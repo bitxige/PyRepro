@@ -16,3 +16,7 @@ engineering review reports.
 - Context-aware engineering review
 - Evidence-backed recommendations
 - Review report generation
+
+## Status
+
+Early-stage prototype.
