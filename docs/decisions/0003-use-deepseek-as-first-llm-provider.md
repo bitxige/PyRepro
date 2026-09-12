@@ -1,6 +1,6 @@
 # ADR 0003: Use DeepSeek as the first LLM provider for the V0.2 experiment
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-12
 
 ## Context
@@ -12,9 +12,10 @@ provider-specific details out of repository-review logic.
 
 ## Decision
 
-For the V0.2 feasibility experiment, evaluate DeepSeek first. The provider
-integration must remain replaceable, and no DeepSeek dependency, API key, or
-agent loop belongs in V0.1.
+For the V0.2 feasibility experiment, evaluate DeepSeek first through its
+OpenAI-compatible API. Keep the integration small and direct: it must not
+introduce a provider framework or provider-specific logic into repository
+analysis. API keys are supplied only through the runtime environment.
 
 ## Consequences
 

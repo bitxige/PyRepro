@@ -29,6 +29,12 @@ All notable changes to RepoSentinel are documented in this file.
 - Added stable project-overview and V0.1 architecture documentation covering
   module responsibilities, data flow, security boundaries, and the planned
   Agent layer.
+- Added an experimental DeepSeek feasibility spike with a bounded read-only
+  tool loop, OpenAI-compatible tool schemas, argument validation, and
+  smoke-test and summary-only modes.
+- Added V0.2 feasibility-spike requirements for the DeepSeek Agent loop.
+- Required repository-tool evidence before an Agent review can complete, and
+  added runtime prompt-injection and final-output safeguards.
 - Added unit tests covering scanner, AST analysis, read-only tools, path safety,
   and Markdown report generation.
 
@@ -43,6 +49,9 @@ All notable changes to RepoSentinel are documented in this file.
   capabilities, and the boundary between static evidence and future contextual
   review.
 - Updated the README with an entry point to the V0.1 architecture guide.
+- Updated `AGENTS.md` from version-specific status instructions to stable
+  architecture, scope, and security rules for future development stages.
+- Accepted ADR 0003 for the bounded DeepSeek V0.2 feasibility experiment.
 - Expanded GitHub Actions validation into a dedicated lint job and pytest jobs
   for Python 3.10 and 3.12. Push validation now runs only for `main`.
 - Kept the V0.1 report explicitly free of mechanical quality scores and
