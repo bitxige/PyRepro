@@ -1,6 +1,6 @@
 # ADR 0003: Use DeepSeek as the first LLM provider for the V0.2 experiment
 
-- Status: Proposed
+- Status: Rejected
 - Date: 2026-09-12
 
 ## Context
@@ -12,18 +12,18 @@ provider-specific details out of repository-review logic.
 
 ## Decision
 
-For the V0.2 feasibility experiment, evaluate DeepSeek first. The provider
-integration must remain replaceable, and no DeepSeek dependency, API key, or
-agent loop belongs in V0.1.
+The DeepSeek feasibility branch validated the tool-driven review architecture,
+but its implementation was not adopted into the mainline. RepoSentinel
+subsequently chose Codex for the next reviewer feasibility experiment.
 
 ## Consequences
 
 Positive:
 
-- The first experiment has a concrete provider and a bounded scope.
-- Repository tools and review logic can remain provider-independent.
+- The experiment provided evidence that a tool-driven reviewer loop is viable.
+- The unmerged implementation remains available as an isolated experiment.
 
 Trade-off:
 
-- This decision does not yet compare providers or guarantee that DeepSeek is
-  the final production choice.
+- DeepSeek is not the mainline reviewer integration. ADR 0005 records the
+  subsequent Codex decision.
