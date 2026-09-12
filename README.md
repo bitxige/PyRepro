@@ -37,25 +37,7 @@ python -m reposentinel examples/sample_project \
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md) for module responsibilities,
-data flow, security boundaries, and the experimental Agent layer.
-
-## V0.2 feasibility spike
-
-The V0.2 spike validates a small, read-only DeepSeek tool loop. It is an
-experiment, not a production review system. Install its optional dependency
-and configure the API key only in the runtime environment:
-
-```bash
-python -m pip install -e ".[dev,agent]"
-export DEEPSEEK_API_KEY="..."
-python -m reposentinel.agent.review_agent --smoke-test
-python -m reposentinel.agent.review_agent examples/sample_project --summary-only
-python -m reposentinel.agent.review_agent examples/sample_project \
-  --output /tmp/sample-project-review.md
-```
-
-`deepseek-v4-pro` is the default model. Use `--model deepseek-v4-flash` for a
-faster smoke or tool-loop check.
+data flow, security boundaries, and the planned Agent layer.
 
 ## Roadmap
 

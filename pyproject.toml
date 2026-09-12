@@ -13,9 +13,6 @@ authors = [{ name = "RepoSentinel contributors" }]
 dependencies = []
 
 [project.optional-dependencies]
-agent = [
-    "openai>=1.0",
-]
 dev = [
     "pre-commit>=3.7",
     "pytest>=8.0",
