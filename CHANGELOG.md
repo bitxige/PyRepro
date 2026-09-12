@@ -26,6 +26,9 @@ All notable changes to RepoSentinel are documented in this file.
   candidates for later contextual-review experiments.
 - Added V0.1 requirements, initial review specification, contributor guidance,
   and project-level Codex development instructions.
+- Added stable project-overview and V0.1 architecture documentation covering
+  module responsibilities, data flow, security boundaries, and the planned
+  Agent layer.
 - Added unit tests covering scanner, AST analysis, read-only tools, path safety,
   and Markdown report generation.
 
@@ -34,6 +37,7 @@ All notable changes to RepoSentinel are documented in this file.
 - Updated the README to describe RepoSentinel's motivation, current V0.1
   capabilities, and the boundary between static evidence and future contextual
   review.
+- Updated the README with an entry point to the V0.1 architecture guide.
 - Kept the V0.1 report explicitly free of mechanical quality scores and
   contextual findings; static observations are presented as evidence for a
   future review agent.
