@@ -246,3 +246,28 @@ The runner audits the JSONL trace and rejects a final response that does not
 use at least one RepoSentinel MCP evidence tool. Codex supplies contextual
 judgement; the static-analysis layer remains responsible only for reliable
 evidence.
+
+## Planned V0.3 evaluation layer
+
+V0.3 will evaluate, rather than expand, the V0.2 reviewer. It will compare a
+direct read-only Codex review with the constrained RepoSentinel review under a
+shared review policy, model, reasoning effort, target repository, and scope.
+
+```text
+Shared review policy
+        |
+        +--> Direct Codex (target repository cwd)
+        |
+        +--> RepoSentinel (temporary cwd and MCP evidence tools)
+                         |
+                         v
+                Reviews, JSONL traces, and metrics
+                         |
+                         v
+             Human-auditable quality and control comparison
+```
+
+The comparison intentionally measures the broader system trade-off between
+open read-only exploration and constrained evidence-driven exploration. It
+does not claim that MCP is the only differing variable. The runtime repository
+path remains separate from the shared policy's project name and scope.
