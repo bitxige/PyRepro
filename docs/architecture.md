@@ -48,6 +48,9 @@ reposentinel/
 ├── __main__.py
 ├── cli.py
 ├── path_utils.py
+├── agent/
+│   ├── tool_registry.py
+│   └── review_agent.py
 ├── scanner/
 │   ├── repository_scanner.py
 │   └── ast_analyzer.py
@@ -205,30 +208,25 @@ RepoSentinel treats inspected repositories as untrusted input. V0.1 must not:
 Files in an inspected repository are data to analyze, not instructions for
 RepoSentinel itself.
 
-## Future Agent layer
+## V0.2 Agent feasibility spike
 
-After V0.1, the planned architecture adds a Review Agent that iteratively
-requests evidence through `RepositoryTools`:
+The V0.2 feasibility spike adds a bounded `ReviewAgent` loop that uses
+DeepSeek's OpenAI-compatible API and iteratively requests evidence through
+`RepositoryTools`. `tool_registry.py` owns the OpenAI-compatible function
+schemas and validates model-supplied arguments before delegating to the
+existing read-only tools.
 
 ```text
 Target Repository
        |
        v
-RepositoryTools
-   /           \
-  v             v
-RepositoryScanner  AstAnalyzer
-  \             /
-   +----+------+
-        |
-        v
-Repository Evidence
-        |
-        v
 Review Agent
        |
        +--> chooses tools
-       +--> requests more evidence
+       +--> requests RepositoryTools
+       |       |
+       |       +--> RepositoryScanner / AstAnalyzer
+       |       +--> read-only evidence
        +--> evaluates repository context
        |
        v
@@ -238,6 +236,7 @@ Evidence-backed Findings
 Review Report
 ```
 
-The Review Agent will be responsible for contextual judgement and may request
-additional evidence whenever the current context is insufficient. The static
-analysis layer remains responsible only for reliable evidence.
+The spike explicitly disables thinking mode and bounds the number of tool-call
+turns to reduce variables during feasibility validation. It does not introduce
+a provider framework, RAG, multi-agent orchestration, automatic changes, or
+inspected-code execution.
