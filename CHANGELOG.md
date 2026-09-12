@@ -55,6 +55,9 @@ All notable changes to RepoSentinel are documented in this file.
   for Python 3.10 and 3.12. Push validation now runs only for `main`.
 - Updated CI test jobs to install the Codex optional dependency required by
   the MCP-server and reviewer tests.
+- Defined the V0.3 review-evaluation design, including a shared parameterized
+  review policy, direct-versus-constrained comparison conditions, research
+  questions, metrics, and human-auditable scoring criteria.
 - Kept the V0.1 report explicitly free of mechanical quality scores and
   contextual findings; static observations are presented as evidence for a
   future review agent.
