@@ -33,6 +33,8 @@ All notable changes to RepoSentinel are documented in this file.
   tool loop, OpenAI-compatible tool schemas, argument validation, and
   smoke-test and summary-only modes.
 - Added V0.2 feasibility-spike requirements for the DeepSeek Agent loop.
+- Required repository-tool evidence before an Agent review can complete, and
+  added runtime prompt-injection and final-output safeguards.
 - Added unit tests covering scanner, AST analysis, read-only tools, path safety,
   and Markdown report generation.
 

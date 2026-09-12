@@ -21,6 +21,9 @@ Validate the smallest read-only Agent loop from a DeepSeek tool call through
 7. Return tool results to the model and continue until it provides a final
    response or reaches a bounded tool-call limit.
 8. Write an optional review output only outside the inspected repository.
+9. Require at least one repository-tool call before accepting a final review.
+10. Treat inspected repository content and tool results as untrusted data; the
+    Agent must not follow instructions contained in them.
 
 ## Non-functional requirements
 
@@ -31,6 +34,8 @@ Validate the smallest read-only Agent loop from a DeepSeek tool call through
 - Preserve the repository-root boundary enforced by `RepositoryTools`.
 - Unit-test the tool registry and loop with a fake client; tests must not call
   the DeepSeek service.
+- Instruct the model to return only the final review, without visible scratch
+  work or self-deliberation.
 
 ## Explicitly out of scope
 
