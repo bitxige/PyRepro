@@ -40,5 +40,5 @@ Trade-off:
 
 - The spike depends on a local Codex CLI installation and authenticated
   ChatGPT/Codex session.
-- Model choice is a configurable default for this experiment, not a permanent
-  claim that Luna is the best reviewer for every repository.
+- Luna with high reasoning effort is the default for this experiment, not a
+  permanent claim that it is the best reviewer for every repository.

@@ -68,6 +68,19 @@ def test_reviewer_builds_a_restricted_luna_command(fixture_repo):
     assert "features.plugins=false" in overrides
     assert f"mcp_servers.{SERVER_NAME}.required=true" in overrides
     assert (
+        f"mcp_servers.{SERVER_NAME}.enabled_tools="
+        + json.dumps(
+            [
+                "get_project_summary",
+                "list_tree",
+                "get_ast_summary",
+                "read_file",
+                "search_code",
+            ]
+        )
+        in overrides
+    )
+    assert (
         f'mcp_servers.{SERVER_NAME}.default_tools_approval_mode="writes"' in overrides
     )
 
