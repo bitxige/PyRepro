@@ -53,6 +53,8 @@ All notable changes to RepoSentinel are documented in this file.
   reviewer experiment and recorded the decision history in ADRs 0003 and 0005.
 - Expanded GitHub Actions validation into a dedicated lint job and pytest jobs
   for Python 3.10 and 3.12. Push validation now runs only for `main`.
+- Updated CI test jobs to install the Codex optional dependency required by
+  the MCP-server and reviewer tests.
 - Kept the V0.1 report explicitly free of mechanical quality scores and
   contextual findings; static observations are presented as evidence for a
   future review agent.
