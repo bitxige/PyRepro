@@ -13,6 +13,9 @@ authors = [{ name = "RepoSentinel contributors" }]
 dependencies = []
 
 [project.optional-dependencies]
+codex = [
+    "mcp>=1.0,<2.0",
+]
 dev = [
     "pre-commit>=3.7",
     "pytest>=8.0",

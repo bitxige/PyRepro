@@ -48,6 +48,9 @@ reposentinel/
 ├── __main__.py
 ├── cli.py
 ├── path_utils.py
+├── agent/
+│   ├── codex_reviewer.py
+│   └── mcp_server.py
 ├── scanner/
 │   ├── repository_scanner.py
 │   └── ast_analyzer.py
@@ -205,31 +208,27 @@ RepoSentinel treats inspected repositories as untrusted input. V0.1 must not:
 Files in an inspected repository are data to analyze, not instructions for
 RepoSentinel itself.
 
-## Future Agent layer
+## V0.2 Codex reviewer feasibility spike
 
-After V0.1, the planned architecture adds a Review Agent that iteratively
-requests evidence through `RepositoryTools`:
+The V0.2 feasibility spike uses Codex as the contextual reviewer while keeping
+RepoSentinel responsible for evidence collection and security boundaries:
 
 ```text
 Target Repository
        |
        v
 RepositoryTools
-   /           \
-  v             v
-RepositoryScanner  AstAnalyzer
-  \             /
-   +----+------+
-        |
-        v
-Repository Evidence
-        |
-        v
-Review Agent
+       ^
        |
-       +--> chooses tools
-       +--> requests more evidence
-       +--> evaluates repository context
+RepoSentinel STDIO MCP Server
+       ^
+       | only five read-only tools
+       |
+Codex / Luna-high
+       ^
+       | codex exec --json
+       |
+Python CodexReviewer
        |
        v
 Evidence-backed Findings
@@ -238,6 +237,12 @@ Evidence-backed Findings
 Review Report
 ```
 
-The Review Agent will be responsible for contextual judgement and may request
-additional evidence whenever the current context is insufficient. The static
-analysis layer remains responsible only for reliable evidence.
+`CodexReviewer` runs Codex from an isolated temporary directory, never from the
+target repository. It disables Codex shell, web search, apps, plugins, and
+multi-agent tools. The target root is provided only to the MCP subprocess;
+Codex receives repository information only through the MCP tool allowlist.
+
+The runner audits the JSONL trace and rejects a final response that does not
+use at least one RepoSentinel MCP evidence tool. Codex supplies contextual
+judgement; the static-analysis layer remains responsible only for reliable
+evidence.

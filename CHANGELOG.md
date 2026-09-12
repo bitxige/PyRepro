@@ -29,6 +29,12 @@ All notable changes to RepoSentinel are documented in this file.
 - Added stable project-overview and V0.1 architecture documentation covering
   module responsibilities, data flow, security boundaries, and the planned
   Agent layer.
+- Added the V0.2 Codex reviewer feasibility spike with a required local STDIO
+  MCP server exposing only the existing read-only repository tools.
+- Added Codex JSONL trace auditing, output-path protection, and a requirement
+  that final reviews use at least one RepoSentinel evidence tool.
+- Added Codex MCP-server and runner tests, including tool metadata, path
+  boundary, restricted command, and zero-evidence regression coverage.
 - Added unit tests covering scanner, AST analysis, read-only tools, path safety,
   and Markdown report generation.
 
@@ -43,6 +49,8 @@ All notable changes to RepoSentinel are documented in this file.
   capabilities, and the boundary between static evidence and future contextual
   review.
 - Updated the README with an entry point to the V0.1 architecture guide.
+- Updated the V0.2 plan from the rejected DeepSeek experiment to the Codex
+  reviewer experiment and recorded the decision history in ADRs 0003 and 0005.
 - Expanded GitHub Actions validation into a dedicated lint job and pytest jobs
   for Python 3.10 and 3.12. Push validation now runs only for `main`.
 - Kept the V0.1 report explicitly free of mechanical quality scores and

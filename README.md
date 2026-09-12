@@ -37,14 +37,31 @@ python -m reposentinel examples/sample_project \
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md) for module responsibilities,
-data flow, security boundaries, and the planned Agent layer.
+data flow, security boundaries, and the Codex reviewer feasibility layer.
+
+## V0.2 Codex feasibility spike
+
+The V0.2 spike validates a constrained, read-only Codex reviewer. It runs
+Codex in a temporary directory and gives it target-repository evidence only
+through RepoSentinel's five local MCP tools.
+
+```bash
+python -m pip install -e ".[dev,codex]"
+codex login status
+python -m reposentinel.agent.codex_reviewer examples/sample_project \
+  --output /tmp/sample-project-review.md \
+  --trace-output /tmp/sample-project-trace.jsonl
+```
+
+The spike defaults to Codex Luna with high reasoning effort. It uses the local
+ChatGPT/Codex CLI authentication and does not require an OpenAI Platform API
+key.
 
 ## Roadmap
 
-V0.2 will explore a small, provider-independent DeepSeek integration and a
-read-only tool loop that lets an agent select relevant evidence before writing
-a contextual review. RAG, automatic fixes, execution of inspected projects,
-and a web application are intentionally out of scope for V0.1.
+V0.2 validates Codex as a contextual reviewer through the read-only evidence
+layer. RAG, automatic fixes, execution of inspected projects, and a web
+application remain out of scope.
 
 ## Development
 
