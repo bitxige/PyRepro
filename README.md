@@ -34,6 +34,11 @@ python -m reposentinel examples/sample_project \
   --output reports/sample-project-profile.md
 ```
 
+## Architecture
+
+See [docs/architecture.md](docs/architecture.md) for module responsibilities,
+data flow, security boundaries, and the planned Agent layer.
+
 ## Roadmap
 
 V0.2 will explore a small, provider-independent DeepSeek integration and a
