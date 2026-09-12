@@ -36,8 +36,8 @@ python -m reposentinel examples/sample_project \
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md) for the V0.1 module
-responsibilities, data flow, and security boundaries.
+See [docs/architecture.md](docs/architecture.md) for module responsibilities,
+data flow, security boundaries, and the planned Agent layer.
 
 ## Roadmap
 

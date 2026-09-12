@@ -11,28 +11,34 @@ The V0.1 architecture is:
 Target Python Repository
         |
         v
-RepositoryScanner
-        |
-        +------> file-level repository facts
-        |
-        v
-AstAnalyzer
-        |
-        +------> syntax-level Python facts
-        |
-        v
 RepositoryTools
+   /           \
+  v             v
+RepositoryScanner  AstAnalyzer
+  \             /
+   +----+------+
         |
-        +------> safe read-only interface
+        v
+Project and AST evidence
         |
         v
 MarkdownReportGenerator
         |
-        +------> static evidence report
+        v
+Markdown profile
 ```
 
 V0.1 does not perform LLM-based engineering judgement. Its purpose is to
 provide reliable evidence for later Agent-based review.
+
+## Design principle
+
+RepoSentinel separates objective evidence from contextual judgement:
+
+> Static analysis provides evidence; the Review Agent provides contextual
+> engineering judgement.
+
+Static signals are not findings by themselves.
 
 ## Package structure
 
@@ -125,10 +131,12 @@ get_ast_summary(path)
 get_project_summary()
 ```
 
-`get_project_summary()` intentionally returns a compact repository overview.
-Detailed AST evidence is requested separately through `get_ast_summary()`, so
-a future Agent can explore repositories incrementally rather than loading an
-entire repository into model context.
+`get_project_summary()` intentionally returns a compact repository-level
+output. It may perform internal AST analysis to compute aggregate counts, but
+it does not expose per-file AST summaries. Detailed per-file evidence is
+requested separately through `get_ast_summary()`, so a future Agent can
+explore repositories incrementally rather than loading an entire repository
+into model context.
 
 ```text
 Agent
@@ -199,23 +207,28 @@ RepoSentinel itself.
 
 ## Future Agent layer
 
-After V0.1, the planned architecture adds a Review Agent above the static
-evidence layer:
+After V0.1, the planned architecture adds a Review Agent that iteratively
+requests evidence through `RepositoryTools`:
 
 ```text
 Target Repository
        |
        v
-Static Evidence Layer
-       |
-       v
 RepositoryTools
-       |
-       v
+   /           \
+  v             v
+RepositoryScanner  AstAnalyzer
+  \             /
+   +----+------+
+        |
+        v
+Repository Evidence
+        |
+        v
 Review Agent
        |
        +--> chooses tools
-       +--> collects relevant evidence
+       +--> requests more evidence
        +--> evaluates repository context
        |
        v
@@ -225,5 +238,6 @@ Evidence-backed Findings
 Review Report
 ```
 
-The Review Agent will be responsible for contextual judgement. The static
+The Review Agent will be responsible for contextual judgement and may request
+additional evidence whenever the current context is insufficient. The static
 analysis layer remains responsible only for reliable evidence.
