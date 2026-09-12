@@ -185,8 +185,12 @@ case.
 
 - Use feature branches and keep `main` runnable.
 - Use pull requests to record what changed, why, and how it was tested.
-- Use `CHANGELOG.md` for user-visible capability changes by version or
-  development stage.
+- Before every substantive commit, decide whether `CHANGELOG.md` needs an
+  update. Include a CHANGELOG entry in the same branch for user-visible
+  capabilities, CLI or report behavior, CI validation policy, requirements or
+  ADR changes, and stable project documentation. Purely internal refactors or
+  test-only changes may omit an entry when they do not change user-facing or
+  project-level behavior.
 - Use Git commits and pull requests as the source of truth for line-level
   changes; do not maintain manual code-diff Markdown files.
 - Update documentation when behavior or an architectural decision changes,
