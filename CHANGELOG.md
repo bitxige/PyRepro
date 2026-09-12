@@ -37,7 +37,17 @@ All notable changes to RepoSentinel are documented in this file.
 - Updated the README to describe RepoSentinel's motivation, current V0.1
   capabilities, and the boundary between static evidence and future contextual
   review.
+### Changed
+
+- Updated the README to describe RepoSentinel's motivation, current V0.1
+  capabilities, and the boundary between static evidence and future contextual
+  review.
 - Updated the README with an entry point to the V0.1 architecture guide.
+- Expanded GitHub Actions validation into a dedicated lint job and pytest jobs
+  for Python 3.10 and 3.12. Push validation now runs only for `main`.
+- Kept the V0.1 report explicitly free of mechanical quality scores and
+  contextual findings; static observations are presented as evidence for a
+  future review agent.
 - Kept the V0.1 report explicitly free of mechanical quality scores and
   contextual findings; static observations are presented as evidence for a
   future review agent.
