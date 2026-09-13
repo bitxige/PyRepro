@@ -1,273 +1,109 @@
-# RepoSentinel Architecture
+# PyRepro Architecture
 
 ## Overview
 
-RepoSentinel separates repository evidence collection from contextual
-software-engineering judgement.
+PyRepro reduces a Python project while preserving a user-specified, stable
+runtime failure. Its central principle is:
 
-The V0.1 architecture is:
+> Static analysis guides reduction; execution validates it.
+
+P0 implements the execution-verified core with a trusted local fixture:
 
 ```text
-Target Python Repository
-        |
-        v
-RepositoryTools
-   /           \
-  v             v
-RepositoryScanner  AstAnalyzer
-  \             /
-   +----+------+
-        |
-        v
-Project and AST evidence
-        |
-        v
-MarkdownReportGenerator
-        |
-        v
-Markdown profile
+Trusted source fixture + reproduction command
+                    |
+                    v
+            ReductionWorkspace
+           disposable project copy
+                    |
+                    v
+              CommandRunner
+                    |
+                    v
+           FailureSignature baseline
+             exception + message + frame
+                    |
+                    v
+            GreedyFileReducer
+       remove candidate -> execute -> decide
+                    |
+                    v
+          Verified reduced project copy
 ```
 
-V0.1 does not perform LLM-based engineering judgement. Its purpose is to
-provide reliable evidence for later Agent-based review.
-
-## Design principle
-
-RepoSentinel separates objective evidence from contextual judgement:
-
-> Static analysis provides evidence; the Review Agent provides contextual
-> engineering judgement.
-
-Static signals are not findings by themselves.
+The original source project is never modified. P0 accepts a deletion only when
+the candidate copy produces the same established failure signature.
 
 ## Package structure
 
 ```text
-reposentinel/
-├── __init__.py
-├── __main__.py
-├── cli.py
-├── path_utils.py
-├── agent/
-│   ├── codex_reviewer.py
-│   └── mcp_server.py
+reposentinel/                  # Temporary internal package name
+├── __main__.py                # PyRepro module entry point
+├── reproducer/
+│   ├── runner.py              # argv command execution and captured output
+│   ├── failure.py             # failure signatures and outcome classification
+│   ├── workspace.py           # disposable copies and source-integrity checks
+│   └── reducer.py             # greedy file-level reduction
 ├── scanner/
-│   ├── repository_scanner.py
-│   └── ast_analyzer.py
-├── tools/
-│   └── repository_tools.py
-└── report/
-    └── markdown_report.py
+│   ├── repository_scanner.py  # retained static repository inventory
+│   └── ast_analyzer.py        # retained syntax-level facts
+└── path_utils.py              # retained repository-path validation
 ```
 
-## `reposentinel.cli`
+The distribution and command are named `pyrepro`. The Python package remains
+`reposentinel` temporarily so that this pivot does not mix product cleanup
+with a broad mechanical import rename.
 
-### Responsibility
+## P0 responsibilities
 
-Provides the command-line entry point for RepoSentinel V0.1. It accepts the
-target repository and report output paths, constructs `RepositoryTools`,
-obtains repository and AST evidence, prevents reports from being written
-inside the inspected repository, and invokes the Markdown report generator.
+### `reproducer.runner`
 
-The CLI coordinates components; it does not contain repository-analysis logic.
+`CommandRunner` executes an argv command in a candidate workspace using
+`shell=False`. It records exit status, standard output, standard error, and
+timeouts. It does not install dependencies or run shell text.
 
-## `reposentinel.path_utils`
+### `reproducer.failure`
 
-### Responsibility
+`FailureSignature` identifies a Python exception by its exception type,
+normalized message, and final repository-relative traceback frame. Line
+numbers are deliberately excluded because reduction can move source lines.
 
-Provides shared path-boundary validation for repository inspection. Its helper
-ensures requested files use repository-relative paths, remain inside the
-selected root, do not escape through `..` or external symbolic links, and are
-regular files.
+P0 establishes this signature three times before reduction. A disagreement
+aborts the run rather than treating a flaky failure as reducible.
 
-This module is part of RepoSentinel's security boundary.
+### `reproducer.workspace`
 
-## `reposentinel.scanner.repository_scanner`
+`ReductionWorkspace` creates a temporary copy of the trusted source fixture.
+It records a source-tree digest and copies the accepted result to a new output
+directory only after final verification.
 
-### Responsibility
+### `reproducer.reducer`
 
-Collects file-level repository facts without executing repository code.
-`RepositoryScanner` discovers regular files, Python files, pytest-style test
-files, and root-level project signals such as a README, `pyproject.toml`,
-requirements file, Git metadata, GitHub Actions workflows, and pre-commit
-configuration.
+`GreedyFileReducer` is the P0 baseline algorithm. It temporarily removes one
+Python file at a time, reruns the command, and retains the deletion only for a
+matching failure. It intentionally does not claim global minimality.
 
-It intentionally does not inspect Python syntax or make quality judgements.
+## Retained static-analysis foundation
 
-### Main output
+`RepositoryScanner`, `AstAnalyzer`, and `path_utils` are retained but are not
+wired into P0's greedy reducer. A later stage may use their deterministic
+facts to prioritize candidates; execution will remain the authority that
+accepts or rejects every deletion.
 
-`RepositoryProfile` contains repository-level facts such as file counts,
-discovered paths, and project metadata signals.
+## P0 trust boundary
 
-## `reposentinel.scanner.ast_analyzer`
+P0 runs only the repository-owned `examples/failing_project` fixture. Both the
+fixture and the argv reproduction command are trusted inputs for this spike.
+`shell=False` avoids shell parsing; it is not a sandbox for arbitrary command
+execution.
 
-### Responsibility
+P0 must not:
 
-Extracts syntax-level facts from Python files using the standard-library
-`ast` module. `AstAnalyzer` never imports or executes inspected Python code.
+- modify the source fixture;
+- install dependencies;
+- use an LLM, MCP server, or agent;
+- use `shell=True`; or
+- claim a globally smallest reproducer.
 
-It extracts:
-
-- classes, functions, and methods;
-- nested lexical scopes and qualified names;
-- source line ranges and function argument counts;
-- module, class, and function docstring presence;
-- imports and naming-convention visibility; and
-- syntax or source-reading errors.
-
-Static facts are evidence, not automatic findings. For example, a function
-length, missing docstring, or argument count does not independently establish
-that a function is poorly designed.
-
-## `reposentinel.tools.repository_tools`
-
-### Responsibility
-
-Provides the read-only interface through which callers, and a future Review
-Agent, can explore repositories:
-
-```text
-list_tree()
-read_file(path)
-search_code(keyword)
-get_ast_summary(path)
-get_project_summary()
-```
-
-`get_project_summary()` intentionally returns a compact repository-level
-output. It may perform internal AST analysis to compute aggregate counts, but
-it does not expose per-file AST summaries. Detailed per-file evidence is
-requested separately through `get_ast_summary()`, so a future Agent can
-explore repositories incrementally rather than loading an entire repository
-into model context.
-
-```text
-Agent
-  |
-  +--> get_project_summary()
-  |
-  +--> decide what matters
-  |
-  +--> get_ast_summary(file)
-  |
-  +--> read_file(file)
-  |
-  +--> search_code(...)
-```
-
-## `reposentinel.report.markdown_report`
-
-### Responsibility
-
-Converts static repository evidence into a deterministic Markdown profile.
-The V0.1 report may present repository statistics, project signals, Python
-files, AST evidence, documentation facts, test-file counts, and static review
-candidates.
-
-It must not turn static signals into contextual engineering findings. A
-function exceeding the current line threshold can be listed as a candidate for
-later inspection, but V0.1 does not label it as a defect.
-
-## Data flow
-
-A normal V0.1 execution follows this flow:
-
-```text
-User selects repository
-        |
-        v
-RepositoryTools
-        |
-        +--> RepositoryScanner
-        |
-        +--> AstAnalyzer
-        |
-        v
-Static evidence
-        |
-        v
-MarkdownReportGenerator
-        |
-        v
-Markdown profile
-```
-
-The inspected repository is never executed or modified.
-
-## Security boundary
-
-RepoSentinel treats inspected repositories as untrusted input. V0.1 must not:
-
-- execute inspected Python files;
-- run inspected tests or install inspected dependencies;
-- execute arbitrary shell commands;
-- modify inspected files;
-- write CLI reports into the inspected repository; or
-- follow paths or symbolic links outside the repository root.
-
-Files in an inspected repository are data to analyze, not instructions for
-RepoSentinel itself.
-
-## V0.2 Codex reviewer feasibility spike
-
-The V0.2 feasibility spike uses Codex as the contextual reviewer while keeping
-RepoSentinel responsible for evidence collection and security boundaries:
-
-```text
-Target Repository
-       |
-       v
-RepositoryTools
-       ^
-       |
-RepoSentinel STDIO MCP Server
-       ^
-       | only five read-only tools
-       |
-Codex / Luna-high
-       ^
-       | codex exec --json
-       |
-Python CodexReviewer
-       |
-       v
-Evidence-backed Findings
-       |
-       v
-Review Report
-```
-
-`CodexReviewer` runs Codex from an isolated temporary directory, never from the
-target repository. It disables Codex shell, web search, apps, plugins, and
-multi-agent tools. The target root is provided only to the MCP subprocess;
-Codex receives repository information only through the MCP tool allowlist.
-
-The runner audits the JSONL trace and rejects a final response that does not
-use at least one RepoSentinel MCP evidence tool. Codex supplies contextual
-judgement; the static-analysis layer remains responsible only for reliable
-evidence.
-
-## Planned V0.3 evaluation layer
-
-V0.3 will evaluate, rather than expand, the V0.2 reviewer. It will compare a
-direct read-only Codex review with the constrained RepoSentinel review under a
-shared review policy, model, reasoning effort, target repository, and scope.
-
-```text
-Shared review policy
-        |
-        +--> Direct Codex (target repository cwd)
-        |
-        +--> RepoSentinel (temporary cwd and MCP evidence tools)
-                         |
-                         v
-                Reviews, JSONL traces, and metrics
-                         |
-                         v
-             Human-auditable quality and control comparison
-```
-
-The comparison intentionally measures the broader system trade-off between
-open read-only exploration and constrained evidence-driven exploration. It
-does not claim that MCP is the only differing variable. The runtime repository
-path remains separate from the shared policy's project name and scope.
+General trusted-local repository support and stronger process isolation are
+future work, not P0 behavior.

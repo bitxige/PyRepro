@@ -20,7 +20,7 @@ restore -> final verification
 - Assume that the fixture and argv command are trusted developer inputs.
   `shell=False` prevents shell parsing but does not sandbox the command.
 - Never install dependencies, use a network setup, modify the original source,
-  or invoke Codex, MCP, or an LLM.
+  or invoke an external agent or LLM service.
 
 ## Failure oracle
 
@@ -63,4 +63,4 @@ Python traceback.
 - ddmin, static ranking, AST or symbol reduction;
 - configuration, data, dependency, or environment reduction;
 - Docker or another execution sandbox; and
-- Codex, MCP, LLMs, web UI, or project renaming.
+- external agent integrations, web UI, or an internal Python package rename.

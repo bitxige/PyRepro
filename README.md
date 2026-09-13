@@ -1,74 +1,76 @@
-# RepoSentinel
+# PyRepro
 
-RepoSentinel is a read-only, evidence-oriented software engineering review
-platform for Python repositories. It combines repository structure, Python AST
-facts, and (in a later version) contextual LLM review to help developers find
-maintainability issues with concrete code locations.
+PyRepro automatically reduces a failing Python project into a smaller,
+execution-verified reproducing case.
 
-The V0.1 development baseline is Python 3.10 or newer.
-
-## Why
-
-Code that runs is not necessarily easy to understand, test, or maintain.
-Traditional linters are useful for objective rules, but questions about module
-responsibility, public API documentation, duplication, and test quality need
-repository context. RepoSentinel is designed to keep static evidence separate
-from those later engineering judgements.
-
-## V0.1 status
-
-The current version is a technical-route validation release. It can:
-
-- scan a local Python repository without executing its code;
-- inventory files and basic project metadata;
-- summarize Python classes, functions, naming-convention visibility, line ranges, arguments,
-  docstrings, and imports using the AST;
-- expose read-only repository tools (`list_tree`, `read_file`, `search_code`,
-  `get_ast_summary`, and `get_project_summary`); and
-- export a Markdown static profile with source-location evidence.
-
-Run it from a checkout with:
-
-```bash
-python -m reposentinel examples/sample_project \
-  --output reports/sample-project-profile.md
+```text
+Large failing project
+        |
+        v
+      PyRepro
+        |
+        v
+Smaller verified reproducer
 ```
 
-## Architecture
+Its guiding principle is:
 
-See [docs/architecture.md](docs/architecture.md) for module responsibilities,
-data flow, security boundaries, and the Codex reviewer feasibility layer.
+> Static analysis guides reduction; execution validates it.
 
-## V0.2 Codex feasibility spike
+## Current status
 
-The V0.2 spike validates a constrained, read-only Codex reviewer. It runs
-Codex in a temporary directory and gives it target-repository evidence only
-through RepoSentinel's five local MCP tools.
+P0 validates the smallest useful end-to-end workflow against a trusted local
+fixture. PyRepro establishes a stable Python failure signature, works in a
+disposable copy, greedily removes irrelevant Python files, and verifies the
+same failure in the final reduced output.
 
-```bash
-python -m pip install -e ".[dev,codex]"
-codex login status
-python -m reposentinel.agent.codex_reviewer examples/sample_project \
-  --output /tmp/sample-project-review.md \
-  --trace-output /tmp/sample-project-trace.jsonl
-```
+P0 is a controlled spike, not yet a general-purpose sandbox for arbitrary
+repositories or commands. It does not install dependencies or modify the
+source project.
 
-The spike defaults to Codex Luna with high reasoning effort. It uses the local
-ChatGPT/Codex CLI authentication and does not require an OpenAI Platform API
-key.
+## Try the P0 fixture
 
-## Roadmap
-
-V0.2 validates Codex as a contextual reviewer through the read-only evidence
-layer. RAG, automatic fixes, execution of inspected projects, and a web
-application remain out of scope.
-
-## Development
-
-See [CHANGELOG.md](CHANGELOG.md) for the current development history.
+From a checkout:
 
 ```bash
 python -m pip install -e ".[dev]"
+pyrepro examples/failing_project \
+  --output /tmp/pyrepro-reduced \
+  -- python reproduce.py
+```
+
+Until the internal package rename is complete, the equivalent module command
+is:
+
+```bash
+python -m reposentinel examples/failing_project \
+  --output /tmp/pyrepro-reduced \
+  -- python reproduce.py
+```
+
+The expected fixture result preserves `KeyError: 'width'` at
+`app/parser.py::parse_lane` while reducing 12 Python files to the three files
+needed for reproduction.
+
+## Architecture and roadmap
+
+See [docs/architecture.md](docs/architecture.md) for the implemented P0 data
+flow and retained static-analysis foundations. The broader goals and staged
+roadmap are in [docs/project-overview.md](docs/project-overview.md).
+
+Planned work, after P0:
+
+- P1: trusted-local command support and more explicit failure matching;
+- P2: grouped and delta-debugging file reduction;
+- P3: static-analysis-guided candidate scheduling;
+- P4: symbol-level reduction; and
+- P5: reproducer packaging and reporting.
+
+## Development
+
+See [CHANGELOG.md](CHANGELOG.md) for notable current changes.
+
+```bash
 ruff check .
 ruff format --check .
 pytest
