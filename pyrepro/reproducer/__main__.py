@@ -1,4 +1,4 @@
-"""Run the P0 command-driven failure reducer as a Python module."""
+"""Run trusted-local command-driven failure reduction as a Python module."""
 
 from __future__ import annotations
 
@@ -16,11 +16,11 @@ from pyrepro.reproducer.reducer import (
 from pyrepro.reproducer.runner import CommandRunner
 from pyrepro.reproducer.workspace import ReductionWorkspace
 
-P0_FIXTURE_ROOT = Path(__file__).parents[2] / "examples" / "failing_project"
+_DEFAULT_OUTPUT_DIRECTORY_NAME = ".pyrepro-output"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Reduce a trusted fixture while preserving a stable Python failure.
+    """Reduce a trusted local project while preserving a stable Python failure.
 
     Args:
         argv: Optional command-line arguments excluding the executable name.
@@ -29,20 +29,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         The process exit status.
     """
     parser = argparse.ArgumentParser(
-        description="Run the P0 command-driven file-reduction spike."
+        description="Reduce a trusted local Python project while preserving a failure."
     )
-    parser.add_argument("source", type=Path, help="trusted source fixture root")
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest="operation", required=True)
+    reduce_parser = subparsers.add_parser(
+        "reduce", help="reduce one trusted local project"
+    )
+    reduce_parser.add_argument("source", type=Path, help="trusted local project root")
+    reduce_parser.add_argument(
         "--output",
-        required=True,
         type=Path,
-        help="new directory for the verified reduced project",
+        help="new reduced-project directory (default: sibling .pyrepro-output/<name>)",
     )
-    parser.add_argument(
+    reduce_parser.add_argument(
         "--timeout-seconds",
         default=5.0,
         type=float,
         help="maximum duration for each command execution (default: 5)",
+    )
+    reduce_parser.add_argument(
+        "--expect",
+        help="text that must occur in the stable baseline failure signature",
     )
     arguments = list(sys.argv[1:] if argv is None else argv)
     try:
@@ -54,17 +61,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("a reproduction command is required after --")
     args = parser.parse_args(arguments[:command_separator])
     source = args.source.expanduser().resolve()
-    if source != P0_FIXTURE_ROOT.resolve():
-        parser.error(
-            "P0 only permits the trusted examples/failing_project fixture source"
-        )
+    if not source.is_dir():
+        parser.error(f"source root is not a directory: {source}")
+    output = args.output or _default_output_directory(source)
 
-    runner = CommandRunner(command, timeout_seconds=args.timeout_seconds)
-    reducer = GreedyFileReducer(runner)
+    print("Warning: PyRepro will repeatedly execute the supplied command.")
+    print("Only run a project and command that you trust.")
     try:
+        runner = CommandRunner(command, timeout_seconds=args.timeout_seconds)
+        reducer = GreedyFileReducer(runner, expected_text=args.expect)
         with ReductionWorkspace(source) as workspace:
             result = reducer.reduce(workspace)
-            destination = workspace.copy_reduced_to(args.output)
+            destination = workspace.copy_reduced_to(output)
             output_result = runner.run(destination)
             output_outcome = classify_result(
                 output_result, result.baseline_signature, destination
@@ -78,6 +86,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(format_reduction_summary(result))
     print(f"Reduced project: {destination}")
     return 0
+
+
+def _default_output_directory(source: Path) -> Path:
+    """Return a sibling output path that cannot be inside source by default."""
+    return source.parent / _DEFAULT_OUTPUT_DIRECTORY_NAME / source.name
 
 
 if __name__ == "__main__":

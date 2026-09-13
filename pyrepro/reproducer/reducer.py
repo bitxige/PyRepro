@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,6 +15,25 @@ from pyrepro.reproducer.failure import (
 )
 from pyrepro.reproducer.runner import CommandRunner
 from pyrepro.reproducer.workspace import ReductionWorkspace
+
+DEFAULT_IGNORED_DIRECTORY_NAMES = frozenset(
+    {
+        ".git",
+        ".pytest_cache",
+        ".venv",
+        "__pycache__",
+        "build",
+        "checkpoints",
+        "data",
+        "dist",
+        "env",
+        "models",
+        "node_modules",
+        "output",
+        "outputs",
+        "venv",
+    }
+)
 
 
 class UnstableBaselineError(RuntimeError):
@@ -66,20 +86,35 @@ class GreedyFileReducer:
         baseline_runs: Number of equal baseline signatures required before deletion.
     """
 
-    def __init__(self, runner: CommandRunner, baseline_runs: int = 3) -> None:
+    def __init__(
+        self,
+        runner: CommandRunner,
+        baseline_runs: int = 3,
+        expected_text: str | None = None,
+        ignored_directory_names: Collection[str] = DEFAULT_IGNORED_DIRECTORY_NAMES,
+    ) -> None:
         """Initialize the reducer.
 
         Args:
             runner: Command runner used to evaluate candidates.
             baseline_runs: Positive number of matching baseline executions.
+            expected_text: Optional text that must occur in the baseline signature.
+            ignored_directory_names: Directory names excluded from deletion candidates.
 
         Raises:
-            ValueError: If baseline_runs is not positive.
+            ValueError: If baseline_runs is not positive or expected_text is blank.
         """
         if baseline_runs <= 0:
             raise ValueError("baseline_runs must be positive")
+        normalized_expectation = None
+        if expected_text is not None:
+            normalized_expectation = " ".join(expected_text.split())
+            if not normalized_expectation:
+                raise ValueError("expected_text must not be blank")
         self.runner = runner
         self.baseline_runs = baseline_runs
+        self.expected_text = normalized_expectation
+        self.ignored_directory_names = frozenset(ignored_directory_names)
 
     def reduce(self, workspace: ReductionWorkspace) -> ReductionResult:
         """Run the P0 greedy file-reduction loop in an active workspace.
@@ -94,7 +129,7 @@ class GreedyFileReducer:
             UnstableBaselineError: If baseline or final verification is not stable.
         """
         baseline_signature, executions = self._establish_baseline(workspace.root)
-        candidates = _python_files(workspace.root)
+        candidates = _python_files(workspace.root, self.ignored_directory_names)
         decisions: list[FileDecision] = []
 
         with tempfile.TemporaryDirectory(prefix="pyrepro-reducer-backups-") as name:
@@ -120,7 +155,9 @@ class GreedyFileReducer:
             baseline_signature=baseline_signature,
             baseline_runs=self.baseline_runs,
             initial_python_files=len(candidates),
-            remaining_python_files=len(_python_files(workspace.root)),
+            remaining_python_files=len(
+                _python_files(workspace.root, self.ignored_directory_names)
+            ),
             executions=executions,
             decisions=tuple(decisions),
             source_unchanged=workspace.source_is_unchanged(),
@@ -138,7 +175,16 @@ class GreedyFileReducer:
             signatures.append(signature)
         if len(set(signatures)) != 1:
             raise UnstableBaselineError("baseline failure signature is unstable")
-        return signatures[0], self.baseline_runs
+        baseline = signatures[0]
+        if (
+            self.expected_text is not None
+            and self.expected_text not in baseline.describe()
+        ):
+            raise UnstableBaselineError(
+                "baseline failure does not contain expected text: "
+                f"{self.expected_text!r}"
+            )
+        return baseline, self.baseline_runs
 
     def _try_remove(
         self,
@@ -197,10 +243,25 @@ def format_reduction_summary(result: ReductionResult) -> str:
     return "\n".join(lines)
 
 
-def _python_files(root: Path) -> tuple[Path, ...]:
+def _python_files(
+    root: Path, ignored_directory_names: Collection[str]
+) -> tuple[Path, ...]:
     return tuple(
         sorted(
-            (path for path in root.rglob("*.py") if path.is_file()),
+            (
+                path
+                for path in root.rglob("*.py")
+                if path.is_file()
+                and not path.is_symlink()
+                and not _is_in_ignored_directory(path, root, ignored_directory_names)
+            ),
             key=lambda path: path.relative_to(root).as_posix(),
         )
     )
+
+
+def _is_in_ignored_directory(
+    path: Path, root: Path, ignored_directory_names: Collection[str]
+) -> bool:
+    relative_parts = path.relative_to(root).parts[:-1]
+    return any(part in ignored_directory_names for part in relative_parts)

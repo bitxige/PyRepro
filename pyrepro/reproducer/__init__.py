@@ -1,1 +1,1 @@
-"""P0 command-driven failure-reduction spike."""
+"""Trusted-local command-driven failure reduction."""
