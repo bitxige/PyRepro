@@ -5,7 +5,7 @@
 Add an execution-verified grouped file-reduction strategy while retaining P1's
 single-file greedy reducer as the baseline. P2 investigates the trade-off
 between reduction quality and expensive reproduction-command executions; it
-does not assume that delta debugging is always faster.
+does not assume that delta debugging is always faster or globally minimal.
 
 ## Scope
 
@@ -50,17 +50,24 @@ The interestingness predicate is:
 F(S) = running the command with retained candidates S yields SAME_FAILURE
 ```
 
-`DdminFileReducer` begins with all candidates retained. It partitions the
-current retained set into non-empty groups, probes groups and their
-complements, and adjusts granularity using the standard ddmin progression.
-Each probe must be semantically equivalent to starting from a clean source
-copy; no accepted or rejected deletion from a previous probe may contaminate a
-later probe.
+`DdminFileReducer` is a ddmin-inspired grouped reducer. It begins with all
+candidates retained, partitions the current retained set into non-empty groups,
+probes groups and their complements, and adjusts granularity using a
+deterministic ddmin-style progression. Each probe must be semantically
+equivalent to starting from a clean source copy; no accepted or rejected
+deletion from a previous probe may contaminate a later probe.
 
-The final retained set must be **1-minimal with respect to candidate files**:
-removing any one remaining candidate must fail to preserve the baseline. P2
-must not call this globally minimal, because different multi-file combinations
-may still exist.
+The reducer then performs a single-file greedy cleanup over the retained set,
+followed by an explicit 1-minimal verification pass. The final retained set is
+**1-minimal with respect to candidate files** only when removing each remaining
+candidate independently fails to preserve the baseline. P2 must not call this
+globally minimal, because a different multi-file combination may still be
+removable.
+
+The grouped search is responsible for discovering opportunities such as a
+coupled subsystem that can be removed only as a group. The final greedy cleanup
+and verification establish the separate 1-minimality property. Do not claim
+that textbook ddmin alone guarantees removal of every removable coupled pair.
 
 ## Metrics
 
@@ -72,11 +79,12 @@ unavailable metric.
 | strategy | `greedy` or `ddmin` |
 | candidate Python files | P1-eligible files before and after reduction |
 | candidate Python LOC | Physical lines in eligible Python files before and after reduction |
-| oracle executions | All reproduction-command executions, including baseline and final verification |
-| candidate attempts | Probe executions after baseline and before final verification |
-| accepted deletions | Candidate files absent from the final verified workspace |
+| oracle executions | All reproduction-command executions, including baseline, grouped search, greedy cleanup, 1-minimal verification, and final verification |
+| candidate attempts | All grouped, complement, cleanup, and 1-minimality probe executions; excludes baseline and final full-workspace verification |
+| accepted probes | Candidate probes yielding `SAME_FAILURE` that cause a grouped or single-file removal decision |
+| removed candidate files | Candidate files absent from the final verified workspace |
 | rejected probes | Candidate probes that did not yield `SAME_FAILURE` |
-| reduction wall-clock seconds | `perf_counter` duration from first baseline execution through final verification |
+| reduction wall-clock seconds | `perf_counter` duration from first baseline execution through final verification, including every minimality probe |
 | failure preserved | Final exact-signature verification result |
 | source unchanged | Source-tree digest result |
 
@@ -105,10 +113,13 @@ remove both together        -> SAME_FAILURE
 
 For example, a loader may require an optional pair to be either fully present
 or fully absent before the independent failure chain executes. The fixture must
-not depend on undeclared third-party packages.
+not depend on undeclared third-party packages. Its deterministic candidate path
+order and partitioning scenario must expose a probe that removes the coupled
+subsystem together.
 
 This benchmark tests more than execution count: greedy reduction should retain
-the coupled pair, while a valid grouped/ddmin reduction can remove both.
+the coupled pair, while the documented grouped search scenario must remove both
+before final 1-minimal verification.
 
 ## Evaluation protocol
 
@@ -133,12 +144,16 @@ reduction quality, retained files/LOC, oracle executions, and wall-clock time.
 2. `--strategy greedy` and `--strategy ddmin` share the same failure oracle
    and candidate exclusions.
 3. The grouped fixture demonstrates the coupled-pair behavior defined above.
-4. ddmin removes the coupled pair while preserving the exact failure.
+4. The deterministic grouped-search scenario removes the coupled pair while
+   preserving the exact failure.
 5. Both strategy outputs are independently verified and leave sources
    unchanged.
 6. Metrics include every field defined above and use actual measurements.
-7. Tests cover partitioning, subset/complement acceptance, 1-minimal final
-   verification, deterministic metrics, and source safety.
+7. Final 1-minimal verification probes every retained candidate and counts all
+   of those probes toward oracle executions, candidate attempts, and
+   wall-clock time.
+8. Tests cover partitioning, subset/complement acceptance, greedy cleanup,
+   1-minimal verification, deterministic metrics, and source safety.
 
 ## Explicitly out of scope
 
