@@ -79,7 +79,8 @@ in [docs/project-overview.md](docs/project-overview.md).
 
 Planned work after P1:
 
-- P2: grouped and delta-debugging file reduction;
+- P2: grouped and delta-debugging file reduction, with oracle-execution-cost
+  metrics and a dedicated grouped-failure benchmark (design defined);
 - P3: static-analysis-guided candidate scheduling;
 - P4: symbol-level reduction; and
 - P5: reproducer packaging and reporting.

@@ -55,7 +55,7 @@ P1 会重复执行用户提供的命令，因此只适用于用户信任的本�
 | --- | --- |
 | P0 | 命令驱动的 greedy 文件级缩减闭环（已完成） |
 | P1 | 可信本地项目命令支持、`--expect` 与候选忽略规则（当前） |
-| P2 | 分组与 delta-debugging 文件缩减 |
+| P2 | 分组与 delta-debugging 文件缩减、oracle execution 指标与专用 benchmark（设计已定义） |
 | P3 | 复用 Scanner / AST 的静态分析候选排序 |
 | P4 | 类、函数、方法级别的 symbol 缩减 |
 | P5 | 可携带 reproducer 打包与结果报告 |
