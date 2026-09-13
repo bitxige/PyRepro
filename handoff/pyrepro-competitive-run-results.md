@@ -141,9 +141,9 @@ false preservation, and execution cost.
 
 ### 3. Build a multi-file benchmark
 
-The comparison exposed a real protocol gap: mature tools commonly expect a
-single input file plus an oracle, while PyRepro starts from a runnable
-repository. A small benchmark should include package imports, `__init__.py`,
+The comparison exposed a workflow gap with Perses-style reducers: PyRepro
+starts from a runnable repository rather than a primary source file plus an
+oracle. A small benchmark should include package imports, `__init__.py`,
 re-exports, coupled modules, syntax-invalid candidates, timeouts, and stable
 failure identity.
 
