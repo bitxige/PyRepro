@@ -2,7 +2,7 @@
 
 ## Objective
 
-Extend PyRepro from file-level reduction to execution-verified source-symbol
+P3 extends PyRepro from file-level reduction to execution-verified source-symbol
 reduction. After the selected file reducer produces a verified workspace, P3
 uses Python AST only to identify complete removable source ranges and uses the
 existing runtime failure oracle as the sole acceptance criterion.
@@ -159,12 +159,11 @@ can dominate total runtime.
 
 ## Symbol-failure benchmark design
 
-P3 will add `examples/symbol_failure` during the implementation PR, not in
-this design-only PR. It must be a deterministic standard-library-only Python
+P3 adds `examples/symbol_failure`, a deterministic standard-library-only Python
 project with:
 
 - 8 to 10 eligible Python files;
-- approximately 700 to 1,200 physical Python LOC;
+- approximately 650 to 1,200 physical Python LOC;
 - at least 30 supported module-level P3 symbols; and
 - a deterministic uncaught failure with a stable traceback frame.
 

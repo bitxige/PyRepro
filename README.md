@@ -19,11 +19,11 @@ Its guiding principle is:
 
 ## Current status
 
-P2 supports a developer-selected **trusted local** Python project and an argv
+P3 supports a developer-selected **trusted local** Python project and an argv
 reproduction command. PyRepro establishes a stable Python failure signature,
 works in a disposable copy, and verifies the same failure in the final output.
-It provides the P1 greedy baseline plus a ddmin-inspired grouped strategy with
-greedy cleanup and explicit 1-minimal verification.
+It provides P1 greedy and P2 grouped file strategies, plus optional P3
+execution-verified reduction of complete top-level Python symbols.
 
 PyRepro runs the supplied command repeatedly. It does not install dependencies
 or modify the source project, but it is not an execution sandbox. Only use it
@@ -36,6 +36,7 @@ python -m pip install -e ".[dev]"
 
 pyrepro reduce ~/my_project \
   --strategy ddmin \
+  --max-granularity symbol \
   --expect "operands could not be broadcast" \
   -- python train.py --config configs/debug.yaml
 ```
@@ -63,6 +64,12 @@ file can be removed independently. It reports candidate Python files and LOC,
 oracle executions, probe outcomes, removed files, and wall-clock duration. It
 does not claim a globally smallest reproducer.
 
+`--max-granularity` accepts `file` (the default) and `symbol`. Symbol mode first
+runs the selected file strategy, then greedily probes complete module-level
+functions, async functions, and classes within the retained files. AST only
+locates original source ranges, including decorators; the runtime failure oracle
+is still the only acceptance criterion.
+
 The module entry point is equivalent:
 
 ```bash
@@ -81,16 +88,18 @@ python -m pyrepro reduce examples/training_failure \
 - `examples/grouped_failure`: contains 33 eligible Python files, including an
   optional pair that greedy retains individually but the grouped strategy can
   remove together while preserving `RuntimeError: grouped reduction failure`.
+- `examples/symbol_failure`: a 9-file, 650-LOC fixture that first reduces to
+  four required files, then removes internal top-level symbol ballast while
+  preserving the deterministic reward shape mismatch.
 
 ## Architecture and roadmap
 
-See [docs/architecture.md](docs/architecture.md) for the P2 data flow and
+See [docs/architecture.md](docs/architecture.md) for the P3 data flow and
 retained static-analysis foundations. The broader goals and staged roadmap are
 in [docs/project-overview.md](docs/project-overview.md).
 
-Planned work after P2:
+Planned work after P3:
 
-- P3: execution-verified AST symbol-level reduction;
 - P4: static-analysis-guided candidate scheduling; and
 - P5: reproducer packaging and reporting.
 

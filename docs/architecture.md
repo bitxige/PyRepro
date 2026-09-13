@@ -7,7 +7,8 @@ user-specified runtime failure. Its central principle is:
 
 > Static analysis guides reduction; execution validates it.
 
-P2 implements the execution-verified file-reduction workflow:
+P3 implements execution-verified file reduction followed by optional
+source-symbol reduction:
 
 ```text
 Trusted local project + argv reproduction command
@@ -25,6 +26,10 @@ Trusted local project + argv reproduction command
        probe candidates -> execute -> decide
                     |
                     v
+      GreedySymbolReducer (optional)
+     complete symbol -> execute -> decide
+                    |
+                    v
           Verified reduced project copy
 ```
 
@@ -40,7 +45,8 @@ pyrepro/
 │   ├── runner.py              # argv command execution and captured output
 │   ├── failure.py             # failure signatures and outcome classification
 │   ├── workspace.py           # disposable copies and source-integrity checks
-│   └── reducer.py             # greedy/grouped reduction and candidate exclusions
+│   ├── reducer.py             # greedy/grouped reduction and candidate exclusions
+│   └── symbol_reducer.py      # AST source spans and greedy symbol reduction
 ├── scanner/
 │   ├── repository_scanner.py  # retained static repository inventory
 │   └── ast_analyzer.py        # retained syntax-level facts
@@ -49,7 +55,7 @@ pyrepro/
 
 The distribution, command, and Python package are named `pyrepro`.
 
-## P2 responsibilities
+## P3 responsibilities
 
 ### `reproducer.__main__`
 
@@ -57,7 +63,7 @@ The CLI accepts:
 
 ```text
 pyrepro reduce <source> [--expect TEXT] [--strategy greedy|ddmin]
-    [--output PATH] -- <argv...>
+    [--max-granularity file|symbol] [--output PATH] -- <argv...>
 ```
 
 It warns that the command will be executed repeatedly and requires users to
@@ -104,20 +110,38 @@ after reduction, probe counts, removed files, command executions, and elapsed
 time. The grouped result is 1-minimal only with respect to individual
 candidate-file removal; neither strategy claims global minimality.
 
+### `reproducer.symbol_reducer`
+
+`GreedySymbolReducer` is the optional P3 phase. It runs only after the selected
+file reducer has preserved the baseline. It discovers module-level
+`FunctionDef`, `AsyncFunctionDef`, and `ClassDef` nodes, then removes their
+original inclusive source ranges from disposable candidate copies. Decorator
+lines are included in a decorated symbol's range.
+
+AST is used only for structural location. Every deletion is accepted only if
+the existing exact failure signature remains after execution. The reducer
+reparses current source after accepted deletions so later ranges are not stale.
+It does not mutate ASTs with `ast.unparse`, delete methods or statements, or
+claim global or symbol-level 1-minimality.
+
+P3 reports file-phase and symbol-phase oracle execution counts and wall-clock
+durations separately, as well as symbol counts, symbol probe outcomes, and
+unparsable files skipped during discovery.
+
 ## Retained static-analysis foundation
 
 `RepositoryScanner`, `AstAnalyzer`, and `path_utils` are retained but are not
-wired into P2's reducers. A later stage may use their deterministic facts
+wired into P3's reducers. A later stage may use their deterministic facts
 to prioritize candidates; execution remains the authority that accepts or
 rejects every deletion.
 
-## P2 trust boundary
+## P3 trust boundary
 
-P2 accepts a developer-selected local source directory and argv command. Both
+P3 accepts a developer-selected local source directory and argv command. Both
 are trusted inputs: PyRepro is not a sandbox for third-party code or arbitrary
 commands. `shell=False` avoids shell parsing; it does not make execution safe.
 
-P2 must not:
+P3 must not:
 
 - modify the source project;
 - install dependencies or set up network access;
@@ -125,5 +149,5 @@ P2 must not:
 - accept a flaky baseline or a different failure; or
 - claim a globally smallest reproducer.
 
-Stronger process isolation, dependency reduction, custom behavior oracles, and
-static-analysis-guided scheduling are future work.
+Stronger process isolation, dependency reduction, custom behavior oracles,
+method-level reduction, and static-analysis-guided scheduling are future work.

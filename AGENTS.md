@@ -34,7 +34,7 @@ Implement only functionality required by the current task, requirement, or
 accepted architectural decision. Prefer simple working mechanisms over
 speculative abstractions.
 
-Do not introduce ddmin, symbol-level reduction, candidate ranking, custom
+Do not introduce candidate ranking, custom
 oracles, dependency reduction, execution sandboxes, web applications, LLMs,
 MCP, RAG, multi-agent systems, automatic fixes, or provider frameworks unless
 the current task explicitly requires them.
@@ -47,7 +47,7 @@ implementations.
 Running a reproduction command is an intentional product capability, not a
 general permission to execute arbitrary code.
 
-P1 accepts a developer-selected trusted local source directory and its trusted
+PyRepro accepts a developer-selected trusted local source directory and its trusted
 argv command. It must:
 
 - use `subprocess` with `shell=False`;
@@ -57,7 +57,7 @@ argv command. It must:
 - avoid dependency installation and network setup; and
 - reject unstable baselines and different failures.
 
-`shell=False` prevents shell parsing; it is not a sandbox. Do not claim P1 is
+`shell=False` prevents shell parsing; it is not a sandbox. Do not claim PyRepro is
 safe for arbitrary third-party repositories or commands.
 
 ## Design rules

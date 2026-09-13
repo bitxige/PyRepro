@@ -15,6 +15,10 @@ from pyrepro.reproducer.reducer import (
     format_reduction_summary,
 )
 from pyrepro.reproducer.runner import CommandRunner
+from pyrepro.reproducer.symbol_reducer import (
+    GreedySymbolReducer,
+    format_symbol_reduction_summary,
+)
 from pyrepro.reproducer.workspace import ReductionWorkspace
 
 _DEFAULT_OUTPUT_DIRECTORY_NAME = ".pyrepro-output"
@@ -58,6 +62,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="greedy",
         help="file-reduction strategy (default: greedy)",
     )
+    reduce_parser.add_argument(
+        "--max-granularity",
+        choices=("file", "symbol"),
+        default="file",
+        help="stop after file reduction or continue with symbols (default: file)",
+    )
     arguments = list(sys.argv[1:] if argv is None else argv)
     try:
         command_separator = arguments.index("--")
@@ -81,11 +91,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         reducer = reducer_type(runner, expected_text=args.expect)
         with ReductionWorkspace(source) as workspace:
-            result = reducer.reduce(workspace)
+            file_result = reducer.reduce(workspace)
+            symbol_result = None
+            if args.max_granularity == "symbol":
+                symbol_result = GreedySymbolReducer(runner).reduce(
+                    workspace, file_result.baseline_signature
+                )
             destination = workspace.copy_reduced_to(output)
             output_result = runner.run(destination)
             output_outcome = classify_result(
-                output_result, result.baseline_signature, destination
+                output_result, file_result.baseline_signature, destination
             )
     except (OSError, UnstableBaselineError, ValueError) as error:
         parser.error(str(error))
@@ -93,7 +108,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     if output_outcome is not ReductionOutcome.SAME_FAILURE:
         parser.error("copied reduced project did not reproduce the baseline failure")
 
-    print(format_reduction_summary(result))
+    print(format_reduction_summary(file_result))
+    if symbol_result is not None:
+        print()
+        print(format_symbol_reduction_summary(symbol_result))
+        print(
+            "Total oracle executions: "
+            f"{file_result.executions + symbol_result.executions}"
+        )
+        print(
+            "Total wall-clock seconds: "
+            f"{file_result.wall_clock_seconds + symbol_result.wall_clock_seconds:.3f}"
+        )
     print(f"Reduced project: {destination}")
     return 0
 
