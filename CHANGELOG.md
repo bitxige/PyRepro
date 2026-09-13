@@ -11,6 +11,8 @@ experiments remain available through Git history and the experiment summary.
   greedy cleanup, explicit 1-minimal verification, and execution-cost metrics.
 - Added a deterministic 33-file grouped-failure benchmark that distinguishes
   individual greedy deletion from grouped deletion of a coupled optional pair.
+- Added the P3 symbol-reduction design, defining AST source-span discovery,
+  execution-only acceptance, phase-specific metrics, and benchmark criteria.
 - Added P1 trusted-local command reduction with the `reduce` subcommand,
   optional `--expect` baseline anchor, default candidate exclusions, and a
   training-failure smoke fixture.

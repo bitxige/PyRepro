@@ -90,8 +90,8 @@ in [docs/project-overview.md](docs/project-overview.md).
 
 Planned work after P2:
 
-- P3: static-analysis-guided candidate scheduling;
-- P4: symbol-level reduction; and
+- P3: execution-verified AST symbol-level reduction;
+- P4: static-analysis-guided candidate scheduling; and
 - P5: reproducer packaging and reporting.
 
 ## Development
