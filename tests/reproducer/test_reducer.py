@@ -75,9 +75,9 @@ class _UnstableRunner:
         self.calls += 1
         file_name = "app/parser.py" if self.calls == 1 else "app/model.py"
         function = "parse_lane" if self.calls == 1 else "build_lane"
-        stderr = f'''Traceback (most recent call last):
+        stderr = f"""Traceback (most recent call last):
   File "{working_directory / file_name}", line 1, in {function}
     raise KeyError("width")
 KeyError: 'width'
-'''
+"""
         return ExecutionResult(("python", "reproduce.py"), 1, "", stderr, False)

@@ -14,13 +14,13 @@ def test_signature_uses_exception_message_and_final_workspace_frame(tmp_path: Pa
     """Distinguish the original KeyError from the same text in another frame."""
     root = tmp_path / "workspace"
     parser_file = root / "app" / "parser.py"
-    stderr = f'''Traceback (most recent call last):
+    stderr = f"""Traceback (most recent call last):
   File "{root / "reproduce.py"}", line 5, in <module>
     parse_lane({{"id": "lane-1"}})
   File "{parser_file}", line 15, in parse_lane
     lane.width = record["width"]
 KeyError: 'width'
-'''
+"""
     result = ExecutionResult(("python", "reproduce.py"), 1, "", stderr, False)
 
     signature = FailureSignature.from_result(result, root)
@@ -36,11 +36,11 @@ def test_classification_rejects_matching_exception_text_in_another_frame(
     """Require the final traceback frame in addition to exception type and text."""
     root = tmp_path / "workspace"
     baseline = FailureSignature("KeyError", "'width'", "app/parser.py", "parse_lane")
-    stderr = f'''Traceback (most recent call last):
+    stderr = f"""Traceback (most recent call last):
   File "{root / "app" / "config.py"}", line 8, in load_config
     return values["width"]
 KeyError: 'width'
-'''
+"""
     result = ExecutionResult(("python", "reproduce.py"), 1, "", stderr, False)
 
     outcome = classify_result(result, baseline, root)
