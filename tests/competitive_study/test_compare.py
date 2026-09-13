@@ -18,7 +18,15 @@ def test_expand_command_replaces_only_explicit_placeholders(tmp_path: Path) -> N
     oracle = tmp_path / "oracle.py"
 
     command = expand_command(
-        ["tool", "--input", "{source}", "--output", "{output}", "{oracle}"],
+        [
+            "tool",
+            "--input",
+            "{source}",
+            "--output",
+            "{output}",
+            "{oracle}",
+            "{source}/main.py",
+        ],
         source,
         output,
         oracle,
@@ -31,6 +39,7 @@ def test_expand_command_replaces_only_explicit_placeholders(tmp_path: Path) -> N
         "--output",
         str(output),
         str(oracle),
+        f"{source}/main.py",
     )
 
 

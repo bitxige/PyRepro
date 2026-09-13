@@ -131,10 +131,12 @@ def expand_command(
         "{output}": str(output.resolve()),
         "{oracle}": str(oracle.resolve()) if oracle is not None else "",
     }
-    return tuple(
-        next((value for key, value in values.items() if token == key), token)
-        for token in command
-    )
+    expanded: list[str] = []
+    for token in command:
+        for placeholder, value in values.items():
+            token = token.replace(placeholder, value)
+        expanded.append(token)
+    return tuple(expanded)
 
 
 def run_external(

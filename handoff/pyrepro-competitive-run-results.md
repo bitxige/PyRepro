@@ -93,6 +93,25 @@ environment limitation, not as a reducer-quality result.
    better. It establishes a useful baseline and exposes the different input,
    oracle, and output contracts.
 
+## P3.5 fair-oracle smoke
+
+The hardened comparison harness was then used on the same 49 LOC adapter.
+Both PyRepro modes completed three stable baseline runs and three stable
+reduced-output verification runs:
+
+| Mode | Match mode | After | Reducer queries | Verification executions | Runtime | Source unchanged |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| PyRepro-message | message | 27 LOC / 2 symbols | 13 | 6 | 0.332 s | Yes |
+| PyRepro-strict | strict | 27 LOC / 2 symbols | 13 | 6 | 0.325 s | Yes |
+
+For the previously completed direct Perses run, the baseline and reduced
+output were each re-executed three times after the fact and produced the same
+message each time. A second attempt to run Perses through the hardened
+disposable-source wrapper failed during Perses initialization before any
+reduction. The direct Perses result remains the valid single-file capability
+result, while the wrapper incompatibility is recorded separately rather than
+treated as a reducer-quality result.
+
 ## Recommended improvement priorities
 
 ### 1. Add finer reduction granularity
