@@ -7,6 +7,8 @@ experiments remain available through Git history and the experiment summary.
 
 ### Added
 
+- Added the P2 grouped/ddmin reduction design, including a deterministic
+  grouped-failure benchmark contract and oracle-execution-cost metrics.
 - Added P1 trusted-local command reduction with the `reduce` subcommand,
   optional `--expect` baseline anchor, default candidate exclusions, and a
   training-failure smoke fixture.
