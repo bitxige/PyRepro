@@ -23,6 +23,8 @@ experiments remain available through Git history and the experiment summary.
   final verification, and regression tests.
 - Added an ADR and an experiment summary documenting the product pivot to
   execution-verified failure reduction.
+- Added a research-only competitor comparison harness and recorded executable
+  baseline runs against PyRepro and external reduction tools.
 
 ### Changed
 
