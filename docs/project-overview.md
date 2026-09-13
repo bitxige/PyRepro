@@ -33,7 +33,7 @@ PyRepro 是一个面向 Python 项目运行故障的自动复现缩减工具。�
 通过“删减后是否仍复现同一故障”的可执行判据进行搜索。完整决策记录见
 [`0007-pivot-to-failure-reduction.md`](decisions/0007-pivot-to-failure-reduction.md)。
 
-## 当前 P1
+## 当前 P2
 
 P1 将 P0 的最小闭环扩展到开发者明确选择的可信本地项目：
 
@@ -46,6 +46,11 @@ P1 将 P0 的最小闭环扩展到开发者明确选择的可信本地项目：
 - 最终再次执行输出副本验证故障；以及
 - 检查原 fixture 在整个过程中未被修改。
 
+P2 在保留 greedy baseline 的同时新增 ddmin-inspired 分组缩减：每个分组 probe
+都从干净的候选副本开始，随后执行单文件 cleanup 与显式 1-minimal 验证。结果记录
+候选 Python 文件和 LOC、oracle executions、probe 接受/拒绝次数、删除文件数与
+wall-clock 时间。P2 不宣称全局最小复现案例。
+
 P1 会重复执行用户提供的命令，因此只适用于用户信任的本地代码与命令。它不承诺
 通用仓库隔离、最小化全局最优解或任意命令的安全执行。
 
@@ -54,8 +59,8 @@ P1 会重复执行用户提供的命令，因此只适用于用户信任的本�
 | 阶段 | 目标 |
 | --- | --- |
 | P0 | 命令驱动的 greedy 文件级缩减闭环（已完成） |
-| P1 | 可信本地项目命令支持、`--expect` 与候选忽略规则（当前） |
-| P2 | 分组与 delta-debugging 文件缩减、oracle execution 指标与专用 benchmark（设计已定义） |
+| P1 | 可信本地项目命令支持、`--expect` 与候选忽略规则（已完成） |
+| P2 | 分组与 ddmin-inspired 文件缩减、oracle execution 指标与专用 benchmark（当前） |
 | P3 | 复用 Scanner / AST 的静态分析候选排序 |
 | P4 | 类、函数、方法级别的 symbol 缩减 |
 | P5 | 可携带 reproducer 打包与结果报告 |

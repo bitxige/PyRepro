@@ -144,3 +144,29 @@ def test_module_cli_rejects_a_blank_expected_failure(tmp_path: Path):
         )
 
     assert error.value.code == 2
+
+
+def test_module_cli_runs_the_ddmin_strategy(tmp_path: Path, capsys):
+    """Expose the P2 grouped reducer through the public CLI strategy option."""
+    output = tmp_path / "ddmin-output"
+
+    status = main(
+        [
+            "reduce",
+            str(FAILING_PROJECT),
+            "--output",
+            str(output),
+            "--strategy",
+            "ddmin",
+            "--",
+            sys.executable,
+            "reproduce.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert "Strategy: ddmin" in captured.out
+    assert "Oracle executions:" in captured.out
+    assert (output / "reproduce.py").is_file()

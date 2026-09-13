@@ -42,6 +42,7 @@ ignore = ["D203", "D213"]
 
 [tool.ruff.lint.per-file-ignores]
 "examples/failing_project/**" = ["D100", "D101", "D102", "D103", "D104", "D107"]
+"examples/grouped_failure/**" = ["D100", "D101", "D102", "D103", "D104", "D107"]
 "examples/training_failure/**" = ["D100", "D101", "D102", "D103", "D104", "D107"]
 
 [tool.ruff.lint.pydocstyle]

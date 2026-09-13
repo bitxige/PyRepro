@@ -7,8 +7,10 @@ experiments remain available through Git history and the experiment summary.
 
 ### Added
 
-- Added the P2 grouped/ddmin reduction design, including a deterministic
-  grouped-failure benchmark contract and oracle-execution-cost metrics.
+- Added P2 grouped/ddmin-inspired file reduction with fresh candidate probes,
+  greedy cleanup, explicit 1-minimal verification, and execution-cost metrics.
+- Added a deterministic 33-file grouped-failure benchmark that distinguishes
+  individual greedy deletion from grouped deletion of a coupled optional pair.
 - Added P1 trusted-local command reduction with the `reduce` subcommand,
   optional `--expect` baseline anchor, default candidate exclusions, and a
   training-failure smoke fixture.

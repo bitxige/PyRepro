@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pyrepro.reproducer.failure import ReductionOutcome, classify_result
 from pyrepro.reproducer.reducer import (
+    DdminFileReducer,
     GreedyFileReducer,
     UnstableBaselineError,
     format_reduction_summary,
@@ -51,6 +52,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--expect",
         help="text that must occur in the stable baseline failure signature",
     )
+    reduce_parser.add_argument(
+        "--strategy",
+        choices=("greedy", "ddmin"),
+        default="greedy",
+        help="file-reduction strategy (default: greedy)",
+    )
     arguments = list(sys.argv[1:] if argv is None else argv)
     try:
         command_separator = arguments.index("--")
@@ -69,7 +76,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("Only run a project and command that you trust.")
     try:
         runner = CommandRunner(command, timeout_seconds=args.timeout_seconds)
-        reducer = GreedyFileReducer(runner, expected_text=args.expect)
+        reducer_type = (
+            GreedyFileReducer if args.strategy == "greedy" else DdminFileReducer
+        )
+        reducer = reducer_type(runner, expected_text=args.expect)
         with ReductionWorkspace(source) as workspace:
             result = reducer.reduce(workspace)
             destination = workspace.copy_reduced_to(output)

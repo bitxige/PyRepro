@@ -7,7 +7,7 @@ user-specified runtime failure. Its central principle is:
 
 > Static analysis guides reduction; execution validates it.
 
-P1 implements the execution-verified file-reduction workflow:
+P2 implements the execution-verified file-reduction workflow:
 
 ```text
 Trusted local project + argv reproduction command
@@ -21,8 +21,8 @@ Trusted local project + argv reproduction command
            disposable project copy
                     |
                     v
-            GreedyFileReducer
-       remove candidate -> execute -> decide
+    GreedyFileReducer or DdminFileReducer
+       probe candidates -> execute -> decide
                     |
                     v
           Verified reduced project copy
@@ -40,7 +40,7 @@ pyrepro/
 │   ├── runner.py              # argv command execution and captured output
 │   ├── failure.py             # failure signatures and outcome classification
 │   ├── workspace.py           # disposable copies and source-integrity checks
-│   └── reducer.py             # greedy file reduction and candidate exclusions
+│   └── reducer.py             # greedy/grouped reduction and candidate exclusions
 ├── scanner/
 │   ├── repository_scanner.py  # retained static repository inventory
 │   └── ast_analyzer.py        # retained syntax-level facts
@@ -49,14 +49,15 @@ pyrepro/
 
 The distribution, command, and Python package are named `pyrepro`.
 
-## P1 responsibilities
+## P2 responsibilities
 
 ### `reproducer.__main__`
 
 The CLI accepts:
 
 ```text
-pyrepro reduce <source> [--expect TEXT] [--output PATH] -- <argv...>
+pyrepro reduce <source> [--expect TEXT] [--strategy greedy|ddmin]
+    [--output PATH] -- <argv...>
 ```
 
 It warns that the command will be executed repeatedly and requires users to
@@ -92,22 +93,31 @@ candidate Python file at a time, reruns the command, and retains the deletion
 only for a matching failure. It excludes common cache, environment, generated
 output, data, model, and checkpoint directories from candidate deletion.
 
-The algorithm intentionally does not claim global minimality.
+`DdminFileReducer` is a ddmin-inspired grouped strategy. It probes retained
+candidate subsets and complements from fresh copies of the original candidate
+tree, then runs single-file cleanup and an explicit 1-minimal verification
+pass. Every probe, including the final minimality checks, contributes to the
+reported oracle-execution and wall-clock metrics.
+
+Both strategies report candidate Python files and physical LOC before and
+after reduction, probe counts, removed files, command executions, and elapsed
+time. The grouped result is 1-minimal only with respect to individual
+candidate-file removal; neither strategy claims global minimality.
 
 ## Retained static-analysis foundation
 
 `RepositoryScanner`, `AstAnalyzer`, and `path_utils` are retained but are not
-wired into P1's greedy reducer. A later stage may use their deterministic facts
+wired into P2's reducers. A later stage may use their deterministic facts
 to prioritize candidates; execution remains the authority that accepts or
 rejects every deletion.
 
-## P1 trust boundary
+## P2 trust boundary
 
-P1 accepts a developer-selected local source directory and argv command. Both
+P2 accepts a developer-selected local source directory and argv command. Both
 are trusted inputs: PyRepro is not a sandbox for third-party code or arbitrary
 commands. `shell=False` avoids shell parsing; it does not make execution safe.
 
-P1 must not:
+P2 must not:
 
 - modify the source project;
 - install dependencies or set up network access;
@@ -115,5 +125,5 @@ P1 must not:
 - accept a flaky baseline or a different failure; or
 - claim a globally smallest reproducer.
 
-Stronger process isolation, dependency reduction, custom behavior oracles,
-and grouped/delta-debugging reduction are future work.
+Stronger process isolation, dependency reduction, custom behavior oracles, and
+static-analysis-guided scheduling are future work.
