@@ -6,6 +6,9 @@ All notable changes to RepoSentinel are documented in this file.
 
 ### Added
 
+- Added the P0 command-driven failure-reduction spike, including a trusted
+  fixture, three-run Python failure signature, disposable workspace, greedy
+  file reduction, final verification, and regression tests.
 - Added the initial V0.1 Python project structure with
   `pyproject.toml`, pytest, Ruff, pre-commit, and a minimal GitHub Actions CI
   workflow.

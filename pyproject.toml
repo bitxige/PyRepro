@@ -45,6 +45,7 @@ ignore = ["D203", "D213"]
 
 [tool.ruff.lint.per-file-ignores]
 "examples/sample_project/**" = ["D100", "D101", "D102", "D103", "D104", "D107"]
+"examples/failing_project/**" = ["D100", "D101", "D102", "D103", "D104", "D107"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
