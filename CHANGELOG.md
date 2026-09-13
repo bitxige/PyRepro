@@ -6,6 +6,8 @@ All notable changes to RepoSentinel are documented in this file.
 
 ### Added
 
+- Added the isolated P0 design for command-driven failure reduction in a
+  disposable workspace, including a stable three-run Python failure oracle.
 - Added the initial V0.1 Python project structure with
   `pyproject.toml`, pytest, Ruff, pre-commit, and a minimal GitHub Actions CI
   workflow.
