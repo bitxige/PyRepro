@@ -27,6 +27,13 @@ class ReductionOutcome(Enum):
     TIMEOUT = "timeout"
 
 
+class FailureMatchMode(str, Enum):
+    """Failure identity modes used by the product and comparison studies."""
+
+    STRICT = "strict"
+    MESSAGE = "message"
+
+
 @dataclass(frozen=True)
 class FailureSignature:
     """Stable identity for an uncaught Python exception.
@@ -87,7 +94,10 @@ class FailureSignature:
 
 
 def classify_result(
-    result: ExecutionResult, baseline: FailureSignature, workspace_root: Path
+    result: ExecutionResult,
+    baseline: FailureSignature,
+    workspace_root: Path,
+    match_mode: FailureMatchMode = FailureMatchMode.STRICT,
 ) -> ReductionOutcome:
     """Classify a command result against the required baseline failure.
 
@@ -95,6 +105,9 @@ def classify_result(
         result: Candidate command result.
         baseline: Stable failure that must remain present.
         workspace_root: Root for traceback-path normalization.
+        match_mode: Failure identity used for comparison. ``strict`` is the
+            product default; ``message`` is intended for controlled reducer
+            comparisons.
 
     Returns:
         The candidate reduction outcome.
@@ -104,9 +117,31 @@ def classify_result(
     if result.return_code == 0:
         return ReductionOutcome.PASS
     signature = FailureSignature.from_result(result, workspace_root)
-    if signature == baseline:
+    if signatures_match(signature, baseline, match_mode):
         return ReductionOutcome.SAME_FAILURE
     return ReductionOutcome.DIFFERENT_FAILURE
+
+
+def signatures_match(
+    candidate: FailureSignature | None,
+    baseline: FailureSignature,
+    match_mode: FailureMatchMode = FailureMatchMode.STRICT,
+) -> bool:
+    """Compare two signatures using an explicit failure identity mode.
+
+    Args:
+        candidate: Candidate execution signature.
+        baseline: Baseline execution signature.
+        match_mode: Strict identity or message-only comparison.
+
+    Returns:
+        Whether the candidate preserves the selected failure identity.
+    """
+    if candidate is None:
+        return False
+    if match_mode is FailureMatchMode.MESSAGE:
+        return candidate.normalized_message == baseline.normalized_message
+    return candidate == baseline
 
 
 def _last_exception(stderr: str) -> tuple[str, str] | None:

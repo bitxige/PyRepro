@@ -82,6 +82,10 @@ timeouts. It does not install dependencies or interpret shell text.
 normalized message, and final repository-relative traceback frame. Line
 numbers are deliberately excluded because reduction can move source lines.
 
+The strict signature is the product default. A message-only matching mode is
+available for controlled external-tool comparisons and is not the default
+acceptance policy.
+
 P1 establishes the signature three times before reduction. An optional
 `--expect` text anchor must match that stable signature. A disagreement aborts
 the run rather than treating a flaky or unintended failure as reducible.
@@ -113,10 +117,11 @@ candidate-file removal; neither strategy claims global minimality.
 ### `reproducer.symbol_reducer`
 
 `GreedySymbolReducer` is the optional P3 phase. It runs only after the selected
-file reducer has preserved the baseline. It discovers module-level
+file reducer has preserved the baseline. It discovers only module-level
 `FunctionDef`, `AsyncFunctionDef`, and `ClassDef` nodes, then removes their
-original inclusive source ranges from disposable candidate copies. Decorator
-lines are included in a decorated symbol's range.
+original inclusive source ranges from disposable candidate copies. Class
+methods, nested symbols, statements, and expressions are not P3 candidates.
+Decorator lines are included in a decorated symbol's range.
 
 AST is used only for structural location. Every deletion is accepted only if
 the existing exact failure signature remains after execution. The reducer

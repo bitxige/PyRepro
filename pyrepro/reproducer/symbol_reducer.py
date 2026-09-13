@@ -12,6 +12,7 @@ from pathlib import Path
 from time import perf_counter
 
 from pyrepro.reproducer.failure import (
+    FailureMatchMode,
     FailureSignature,
     ReductionOutcome,
     classify_result,
@@ -100,6 +101,7 @@ class SymbolReductionResult:
     """
 
     baseline_signature: FailureSignature
+    failure_match_mode: FailureMatchMode
     initial_python_lines: int
     remaining_python_lines: int
     initial_symbols: int
@@ -119,16 +121,19 @@ class GreedySymbolReducer:
 
     Args:
         runner: Command runner used for each disposable symbol probe.
+        match_mode: Failure identity used for candidate acceptance.
         ignored_directory_names: Directory names excluded from P1-eligible files.
     """
 
     def __init__(
         self,
         runner: CommandRunner,
+        match_mode: FailureMatchMode = FailureMatchMode.STRICT,
         ignored_directory_names: Collection[str] = DEFAULT_IGNORED_DIRECTORY_NAMES,
     ) -> None:
         """Initialize the P3 greedy symbol reducer."""
         self.runner = runner
+        self.match_mode = match_mode
         self.ignored_directory_names = frozenset(ignored_directory_names)
 
     def reduce(
@@ -187,7 +192,10 @@ class GreedySymbolReducer:
                 rejected_identities.add(candidate.identity)
 
         final_outcome = _verify_final_workspace(
-            self.runner, workspace.root, baseline_signature
+            self.runner,
+            workspace.root,
+            baseline_signature,
+            self.match_mode,
         )
         if final_outcome is not ReductionOutcome.SAME_FAILURE:
             raise UnstableBaselineError(
@@ -203,6 +211,7 @@ class GreedySymbolReducer:
 
         return SymbolReductionResult(
             baseline_signature=baseline_signature,
+            failure_match_mode=self.match_mode,
             initial_python_lines=initial_lines,
             remaining_python_lines=_python_line_count(remaining_files),
             initial_symbols=initial_symbols,
@@ -228,7 +237,9 @@ class GreedySymbolReducer:
             shutil.copytree(workspace_root, probe_root)
             _remove_symbol_span(probe_root / candidate.file_path, candidate)
             result = self.runner.run(probe_root)
-            return classify_result(result, baseline_signature, probe_root)
+            return classify_result(
+                result, baseline_signature, probe_root, self.match_mode
+            )
 
 
 def discover_symbols(path: Path, workspace_root: Path) -> SymbolDiscovery:

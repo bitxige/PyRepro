@@ -23,9 +23,17 @@ experiments remain available through Git history and the experiment summary.
   final verification, and regression tests.
 - Added an ADR and an experiment summary documenting the product pivot to
   execution-verified failure reduction.
+- Added a research-only competitor comparison harness and recorded executable
+  baseline runs against PyRepro and external reduction tools.
+- Added source-integrity digests, three-run comparison verification, separated
+  reducer-query and verification metrics, and an experiment-only message
+  matching mode for fair reducer comparisons.
 
 ### Changed
 
+- Reoriented the competitive-study roadmap toward repository-level dependency
+  handling and failure-oracle research rather than native statement-level
+  minimization.
 - Renamed the project, distribution, command, and Python package to PyRepro.
 - Reoriented current documentation, architecture, instructions, and CI toward
   command-driven failure reduction.
