@@ -114,15 +114,17 @@ treated as a reducer-quality result.
 
 ## Recommended improvement priorities
 
-### 1. Keep finer native granularity as a possible extension
+### 1. Improve project-level dependency handling
 
-P3 removes complete module-level functions, async functions, and classes.
-Perses and AutoDD-style reducers can remove smaller syntax units. Finer native
-reduction granularity remains a possible extension, but this competitive study
-shows that mature syntax-guided reducers already provide stronger single-file
-minimization. PyRepro's immediate research priority is therefore
-repository-level dependency handling and failure-oracle abstraction rather
-than reproducing mature grammar-level reduction functionality.
+The original multi-file workflow is PyRepro's strongest differentiator, but
+blind probes can produce avoidable import/package failures. Investigate
+Python-specific import topology, package initializers, re-exports, fixtures,
+and symbol references for candidate grouping and scheduling. Static analysis
+may prioritize or group candidates; runtime verification remains the final
+authority.
+
+This should be positioned as Python repository-specific scheduling/grouping,
+not as the first dependency-aware reducer in the literature.
 
 ### 2. Make the oracle contract configurable
 
@@ -137,17 +139,13 @@ user-provided substring / predicate
 The evaluation must measure how oracle strength changes reduction size,
 false preservation, and execution cost.
 
-### 3. Improve project-level dependency handling
+### 3. Build a multi-file benchmark
 
-The original multi-file workflow is PyRepro's strongest differentiator, but
-blind probes can produce avoidable import/package failures. Investigate
-Python-specific import topology, package initializers, re-exports, fixtures,
-and symbol references for candidate grouping and scheduling. Static analysis
-may prioritize or group candidates; runtime verification remains the final
-authority.
-
-This should be positioned as Python repository-specific scheduling/grouping,
-not as the first dependency-aware reducer in the literature.
+The comparison exposed a real protocol gap: mature tools commonly expect a
+single input file plus an oracle, while PyRepro starts from a runnable
+repository. A small benchmark should include package imports, `__init__.py`,
+re-exports, coupled modules, syntax-invalid candidates, timeouts, and stable
+failure identity.
 
 ### 4. Emit comparable machine-readable metrics
 
@@ -162,13 +160,15 @@ failure signature
 output verification status
 ```
 
-### 5. Build a multi-file benchmark
+### 5. Keep finer native granularity as a possible extension
 
-The comparison exposed a real protocol gap: mature tools commonly expect a
-single input file plus an oracle, while PyRepro starts from a runnable
-repository. A small benchmark should include package imports, `__init__.py`,
-re-exports, coupled modules, syntax-invalid candidates, timeouts, and stable
-failure identity.
+P3 removes complete module-level functions, async functions, and classes.
+Perses and AutoDD-style reducers can remove smaller syntax units. Finer native
+reduction granularity remains a possible extension, but this competitive study
+shows that mature syntax-guided reducers already provide stronger single-file
+minimization. PyRepro's immediate research priority is therefore
+repository-level dependency handling and failure-oracle abstraction rather
+than reproducing mature grammar-level reduction functionality.
 
 ## Current conclusion
 
