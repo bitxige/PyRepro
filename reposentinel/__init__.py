@@ -1,3 +1,3 @@
-"""Read-only repository analysis tools for RepoSentinel V0.1."""
+"""Internal Python package for the PyRepro command-driven reducer."""
 
 __version__ = "0.1.0"

@@ -3,19 +3,16 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "reposentinel"
+name = "pyrepro"
 version = "0.1.0"
-description = "Evidence-oriented static review infrastructure for Python repositories."
+description = "Execution-verified failure reduction for Python projects."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-authors = [{ name = "RepoSentinel contributors" }]
+authors = [{ name = "PyRepro contributors" }]
 dependencies = []
 
 [project.optional-dependencies]
-codex = [
-    "mcp>=1.0,<2.0",
-]
 dev = [
     "pre-commit>=3.7",
     "pytest>=8.0",
@@ -23,7 +20,7 @@ dev = [
 ]
 
 [project.scripts]
-reposentinel = "reposentinel.cli:main"
+pyrepro = "reposentinel.reproducer.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -44,7 +41,6 @@ select = ["E", "F", "I", "UP", "D100", "D101", "D102", "D103", "D104", "D107"]
 ignore = ["D203", "D213"]
 
 [tool.ruff.lint.per-file-ignores]
-"examples/sample_project/**" = ["D100", "D101", "D102", "D103", "D104", "D107"]
 "examples/failing_project/**" = ["D100", "D101", "D102", "D103", "D104", "D107"]
 
 [tool.ruff.lint.pydocstyle]

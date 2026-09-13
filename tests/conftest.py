@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for RepoSentinel tests."""
+"""Shared pytest fixtures for PyRepro tests."""
 
 from pathlib import Path
 

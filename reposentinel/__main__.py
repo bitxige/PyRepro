@@ -1,5 +1,5 @@
-"""Run RepoSentinel as a Python module."""
+"""Run PyRepro through its temporary ``reposentinel`` package name."""
 
-from reposentinel.cli import main
+from reposentinel.reproducer.__main__ import main
 
 raise SystemExit(main())
