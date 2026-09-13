@@ -10,6 +10,7 @@ from pyrepro.reproducer.runner import CommandRunner
 
 FAILING_PROJECT = Path(__file__).parents[2] / "examples" / "failing_project"
 TRAINING_PROJECT = Path(__file__).parents[2] / "examples" / "training_failure"
+SYMBOL_PROJECT = Path(__file__).parents[2] / "examples" / "symbol_failure"
 
 
 def test_runner_captures_uncaught_exception_output(tmp_path: Path):
@@ -170,3 +171,38 @@ def test_module_cli_runs_the_ddmin_strategy(tmp_path: Path, capsys):
     assert "Strategy: ddmin" in captured.out
     assert "Oracle executions:" in captured.out
     assert (output / "reproduce.py").is_file()
+
+
+@pytest.mark.parametrize("strategy", ("greedy", "ddmin"))
+def test_module_cli_runs_symbol_reduction_after_the_file_strategy(
+    tmp_path: Path, capsys, strategy: str
+):
+    """Run P3 after either supported file-reduction strategy."""
+    output = tmp_path / f"symbol-output-{strategy}"
+
+    status = main(
+        [
+            "reduce",
+            str(SYMBOL_PROJECT),
+            "--output",
+            str(output),
+            "--max-granularity",
+            "symbol",
+            "--strategy",
+            strategy,
+            "--",
+            sys.executable,
+            "reproduce.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert f"Strategy: {strategy}" in captured.out
+    assert "Symbol reduction" in captured.out
+    assert "Supported symbols:" in captured.out
+    assert "Total oracle executions:" in captured.out
+    assert "RewardComparisonArchive" not in (
+        output / "reward" / "shaping.py"
+    ).read_text(encoding="utf-8")
