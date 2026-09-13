@@ -7,13 +7,13 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from reposentinel.reproducer.failure import (
+from pyrepro.reproducer.failure import (
     FailureSignature,
     ReductionOutcome,
     classify_result,
 )
-from reposentinel.reproducer.runner import CommandRunner
-from reposentinel.reproducer.workspace import ReductionWorkspace
+from pyrepro.reproducer.runner import CommandRunner
+from pyrepro.reproducer.workspace import ReductionWorkspace
 
 
 class UnstableBaselineError(RuntimeError):
@@ -97,9 +97,7 @@ class GreedyFileReducer:
         candidates = _python_files(workspace.root)
         decisions: list[FileDecision] = []
 
-        with tempfile.TemporaryDirectory(
-            prefix="reposentinel-reducer-backups-"
-        ) as name:
+        with tempfile.TemporaryDirectory(prefix="pyrepro-reducer-backups-") as name:
             backup_root = Path(name)
             for candidate in candidates:
                 decision, candidate_executions = self._try_remove(

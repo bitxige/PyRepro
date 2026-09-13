@@ -4,8 +4,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from reposentinel.reproducer.__main__ import main
-from reposentinel.reproducer.runner import CommandRunner
+from pyrepro.reproducer.__main__ import main
+from pyrepro.reproducer.runner import CommandRunner
 
 FAILING_PROJECT = Path(__file__).parents[2] / "examples" / "failing_project"
 

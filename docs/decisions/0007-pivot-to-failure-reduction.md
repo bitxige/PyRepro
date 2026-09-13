@@ -37,7 +37,6 @@ explicit static-guidance stage.
   and their dedicated dependencies and tests from the mainline.
 - Preserve prior ADRs and a concise experiment summary as historical evidence;
   do not rewrite past experiments as if they never occurred.
-- Adopt PyRepro in user-facing documentation and distribution metadata while
-  retaining the `reposentinel` Python package temporarily to avoid a broad
-  mechanical rename in the pivot patch.
+- Adopt PyRepro in user-facing documentation and distribution metadata. The
+  subsequent package-rename refactor will align the internal import path.
 - Do not add new reduction functionality in this pivot-only change.

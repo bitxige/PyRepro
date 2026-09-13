@@ -2,12 +2,12 @@
 
 from pathlib import Path
 
-from reposentinel.reproducer.failure import (
+from pyrepro.reproducer.failure import (
     FailureSignature,
     ReductionOutcome,
     classify_result,
 )
-from reposentinel.reproducer.runner import ExecutionResult
+from pyrepro.reproducer.runner import ExecutionResult
 
 
 def test_signature_uses_exception_message_and_final_workspace_frame(tmp_path: Path):

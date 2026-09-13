@@ -1,6 +1,6 @@
 """Tests for syntax-only Python AST analysis."""
 
-from reposentinel.scanner.ast_analyzer import AstAnalyzer
+from pyrepro.scanner.ast_analyzer import AstAnalyzer
 
 
 def test_ast_summary_contains_symbols_and_facts(fixture_repo):

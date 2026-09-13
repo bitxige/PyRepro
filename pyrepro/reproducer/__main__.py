@@ -7,14 +7,14 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from reposentinel.reproducer.failure import ReductionOutcome, classify_result
-from reposentinel.reproducer.reducer import (
+from pyrepro.reproducer.failure import ReductionOutcome, classify_result
+from pyrepro.reproducer.reducer import (
     GreedyFileReducer,
     UnstableBaselineError,
     format_reduction_summary,
 )
-from reposentinel.reproducer.runner import CommandRunner
-from reposentinel.reproducer.workspace import ReductionWorkspace
+from pyrepro.reproducer.runner import CommandRunner
+from pyrepro.reproducer.workspace import ReductionWorkspace
 
 P0_FIXTURE_ROOT = Path(__file__).parents[2] / "examples" / "failing_project"
 

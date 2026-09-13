@@ -39,11 +39,10 @@ pyrepro examples/failing_project \
   -- python reproduce.py
 ```
 
-Until the internal package rename is complete, the equivalent module command
-is:
+The module entry point is equivalent:
 
 ```bash
-python -m reposentinel examples/failing_project \
+python -m pyrepro examples/failing_project \
   --output /tmp/pyrepro-reduced \
   -- python reproduce.py
 ```

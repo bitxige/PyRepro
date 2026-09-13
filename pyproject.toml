@@ -20,11 +20,11 @@ dev = [
 ]
 
 [project.scripts]
-pyrepro = "reposentinel.reproducer.__main__:main"
+pyrepro = "pyrepro.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["reposentinel*"]
+include = ["pyrepro*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -34,7 +34,7 @@ addopts = "-ra"
 [tool.ruff]
 line-length = 88
 target-version = "py310"
-src = ["reposentinel", "tests"]
+src = ["pyrepro", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "D100", "D101", "D102", "D103", "D104", "D107"]
