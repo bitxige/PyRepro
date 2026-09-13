@@ -2,7 +2,7 @@
 
 ## Objective
 
-Add an execution-verified grouped file-reduction strategy while retaining P1's
+P2 adds an execution-verified grouped file-reduction strategy while retaining P1's
 single-file greedy reducer as the baseline. P2 investigates the trade-off
 between reduction quality and expensive reproduction-command executions; it
 does not assume that delta debugging is always faster or globally minimal.
@@ -23,7 +23,7 @@ signature.
 
 ## Strategy contract
 
-P2 retains `GreedyFileReducer` unchanged as a baseline and adds a concrete
+P2 retains `GreedyFileReducer` as a baseline and adds a concrete
 `DdminFileReducer`. Do not introduce an abstract reducer hierarchy unless a
 real second shared behavior requires it.
 
@@ -93,8 +93,7 @@ command can dominate all local file-operation costs.
 
 ## Grouped-failure benchmark design
 
-P2 implementation will add `examples/grouped_failure`; this design PR does
-not create an empty placeholder fixture.
+P2 adds `examples/grouped_failure` with no empty placeholder fixtures.
 
 The completed fixture must contain 30 to 50 eligible Python files:
 
@@ -138,7 +137,7 @@ timing variation.
 Do not claim ddmin is categorically faster. Report the measured trade-off:
 reduction quality, retained files/LOC, oracle executions, and wall-clock time.
 
-## Completion criteria for the later implementation PR
+## P2 completion criteria
 
 1. Existing greedy behavior and P1 tests remain intact.
 2. `--strategy greedy` and `--strategy ddmin` share the same failure oracle

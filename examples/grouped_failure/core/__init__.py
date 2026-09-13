@@ -1,0 +1,1 @@
+"""Core failure-chain package."""
