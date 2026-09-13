@@ -114,12 +114,15 @@ treated as a reducer-quality result.
 
 ## Recommended improvement priorities
 
-### 1. Add finer reduction granularity
+### 1. Keep finer native granularity as a possible extension
 
-P3 removes complete functions, classes, and methods. Perses and AutoDD-style
- reducers can remove smaller syntax units. The next PyRepro improvement should
- be statement/block reduction, but it must preserve source formatting and use
- the execution oracle for every acceptance decision.
+P3 removes complete module-level functions, async functions, and classes.
+Perses and AutoDD-style reducers can remove smaller syntax units. Finer native
+reduction granularity remains a possible extension, but this competitive study
+shows that mature syntax-guided reducers already provide stronger single-file
+minimization. PyRepro's immediate research priority is therefore
+repository-level dependency handling and failure-oracle abstraction rather
+than reproducing mature grammar-level reduction functionality.
 
 ### 2. Make the oracle contract configurable
 

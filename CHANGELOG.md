@@ -31,6 +31,9 @@ experiments remain available through Git history and the experiment summary.
 
 ### Changed
 
+- Reoriented the competitive-study roadmap toward repository-level dependency
+  handling and failure-oracle research rather than native statement-level
+  minimization.
 - Renamed the project, distribution, command, and Python package to PyRepro.
 - Reoriented current documentation, architecture, instructions, and CI toward
   command-driven failure reduction.
