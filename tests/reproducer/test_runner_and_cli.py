@@ -1,5 +1,6 @@
-"""Tests for bounded argv execution and the P0 module command-line interface."""
+"""Tests for bounded argv execution and the P1 module command-line interface."""
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from pyrepro.reproducer.__main__ import main
 from pyrepro.reproducer.runner import CommandRunner
 
 FAILING_PROJECT = Path(__file__).parents[2] / "examples" / "failing_project"
+TRAINING_PROJECT = Path(__file__).parents[2] / "examples" / "training_failure"
 
 
 def test_runner_captures_uncaught_exception_output(tmp_path: Path):
@@ -36,11 +38,12 @@ def test_runner_reports_timeout(tmp_path: Path):
 
 
 def test_module_cli_writes_a_verified_reduced_project(tmp_path: Path, capsys):
-    """Run the complete P0 loop through the isolated module entry point."""
+    """Run the P1 loop through the public subcommand entry point."""
     output = tmp_path / "reduced-project"
 
     status = main(
         [
+            "reduce",
             str(FAILING_PROJECT),
             "--output",
             str(output),
@@ -58,20 +61,85 @@ def test_module_cli_writes_a_verified_reduced_project(tmp_path: Path, capsys):
     assert (output / "reproduce.py").is_file()
 
 
-def test_module_cli_rejects_an_untrusted_source_root(tmp_path: Path):
-    """Limit P0 execution to the repository-owned deterministic fixture."""
-    untrusted_source = tmp_path / "untrusted"
-    untrusted_source.mkdir()
+def test_module_cli_reduces_a_trusted_local_training_project(tmp_path: Path, capsys):
+    """Allow a non-P0 local project while preserving an expected failure."""
+    output = tmp_path / "reduced-training-project"
 
+    status = main(
+        [
+            "reduce",
+            str(TRAINING_PROJECT),
+            "--output",
+            str(output),
+            "--expect",
+            "operands could not be broadcast",
+            "--",
+            sys.executable,
+            "train.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert "Warning: PyRepro will repeatedly execute" in captured.out
+    assert "ValueError: operands could not be broadcast" in captured.out
+    assert (output / "reward" / "shaping.py").is_file()
+
+
+def test_module_cli_uses_a_sibling_default_output_directory(tmp_path: Path):
+    """Keep the default output outside the trusted source project."""
+    source = tmp_path / "training-project"
+    shutil.copytree(TRAINING_PROJECT, source)
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--",
+            sys.executable,
+            "train.py",
+        ]
+    )
+
+    assert status == 0
+    assert (tmp_path / ".pyrepro-output" / source.name / "train.py").is_file()
+
+
+def test_module_cli_rejects_a_nonmatching_expected_failure(tmp_path: Path):
+    """Abort before deletion when --expect does not match the baseline."""
     with pytest.raises(SystemExit) as error:
         main(
             [
-                str(untrusted_source),
+                "reduce",
+                str(TRAINING_PROJECT),
                 "--output",
                 str(tmp_path / "output"),
+                "--expect",
+                "IndexError",
                 "--",
                 sys.executable,
-                "reproduce.py",
+                "train.py",
+            ]
+        )
+
+    assert error.value.code == 2
+
+
+def test_module_cli_rejects_a_blank_expected_failure(tmp_path: Path):
+    """Present an argparse error instead of leaking a constructor ValueError."""
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "reduce",
+                str(TRAINING_PROJECT),
+                "--output",
+                str(tmp_path / "output"),
+                "--expect",
+                "   ",
+                "--",
+                sys.executable,
+                "train.py",
             ]
         )
 

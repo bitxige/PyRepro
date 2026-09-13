@@ -7,6 +7,9 @@ experiments remain available through Git history and the experiment summary.
 
 ### Added
 
+- Added P1 trusted-local command reduction with the `reduce` subcommand,
+  optional `--expect` baseline anchor, default candidate exclusions, and a
+  training-failure smoke fixture.
 - Added the P0 command-driven failure-reduction workflow: a trusted fixture,
   three-run failure signature, disposable workspace, greedy file reduction,
   final verification, and regression tests.

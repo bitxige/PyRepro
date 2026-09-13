@@ -10,6 +10,7 @@ from pyrepro.reproducer.runner import CommandRunner, ExecutionResult
 from pyrepro.reproducer.workspace import ReductionWorkspace, tree_digest
 
 FAILING_PROJECT = Path(__file__).parents[2] / "examples" / "failing_project"
+TRAINING_PROJECT = Path(__file__).parents[2] / "examples" / "training_failure"
 
 
 def test_reducer_removes_ballast_preserves_failure_and_source(tmp_path: Path):
@@ -53,6 +54,49 @@ def test_reducer_rejects_an_unstable_three_run_baseline(tmp_path: Path):
         reducer = GreedyFileReducer(_UnstableRunner())
 
         with pytest.raises(UnstableBaselineError, match="unstable"):
+            reducer.reduce(workspace)
+
+
+def test_reducer_skips_project_data_directories_and_honors_expectation(
+    tmp_path: Path,
+):
+    """Preserve the training failure without deleting protected data candidates."""
+    source_digest = tree_digest(TRAINING_PROJECT)
+    runner = CommandRunner((sys.executable, "train.py"), timeout_seconds=2)
+    output = tmp_path / "reduced-training-project"
+
+    with ReductionWorkspace(TRAINING_PROJECT) as workspace:
+        result = GreedyFileReducer(
+            runner, expected_text="operands could not be broadcast"
+        ).reduce(workspace)
+        destination = workspace.copy_reduced_to(output)
+
+    remaining_python_files = {
+        path.relative_to(destination).as_posix() for path in destination.rglob("*.py")
+    }
+
+    assert result.initial_python_files == 12
+    assert result.remaining_python_files == 4
+    assert result.source_unchanged
+    assert all(not decision.path.startswith("data/") for decision in result.decisions)
+    assert remaining_python_files == {
+        "agent/trainer.py",
+        "data/sample_batch.py",
+        "environment/road_env.py",
+        "reward/shaping.py",
+        "train.py",
+    }
+    assert tree_digest(TRAINING_PROJECT) == source_digest
+
+
+def test_reducer_rejects_a_nonmatching_expected_failure():
+    """Require the optional expectation to match the established baseline."""
+    runner = CommandRunner((sys.executable, "train.py"), timeout_seconds=2)
+
+    with ReductionWorkspace(TRAINING_PROJECT) as workspace:
+        reducer = GreedyFileReducer(runner, expected_text="IndexError")
+
+        with pytest.raises(UnstableBaselineError, match="expected text"):
             reducer.reduce(workspace)
 
 

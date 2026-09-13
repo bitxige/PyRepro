@@ -47,8 +47,8 @@ implementations.
 Running a reproduction command is an intentional product capability, not a
 general permission to execute arbitrary code.
 
-P0 accepts only the repository-owned trusted fixture and its trusted argv
-command. It must:
+P1 accepts a developer-selected trusted local source directory and its trusted
+argv command. It must:
 
 - use `subprocess` with `shell=False`;
 - run candidates only in disposable workspaces;
@@ -57,7 +57,7 @@ command. It must:
 - avoid dependency installation and network setup; and
 - reject unstable baselines and different failures.
 
-`shell=False` prevents shell parsing; it is not a sandbox. Do not claim P0 is
+`shell=False` prevents shell parsing; it is not a sandbox. Do not claim P1 is
 safe for arbitrary third-party repositories or commands.
 
 ## Design rules
