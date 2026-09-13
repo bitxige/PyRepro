@@ -4,10 +4,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from reposentinel.reproducer.failure import FailureSignature, ReductionOutcome
-from reposentinel.reproducer.reducer import GreedyFileReducer, UnstableBaselineError
-from reposentinel.reproducer.runner import CommandRunner, ExecutionResult
-from reposentinel.reproducer.workspace import ReductionWorkspace, tree_digest
+from pyrepro.reproducer.failure import FailureSignature, ReductionOutcome
+from pyrepro.reproducer.reducer import GreedyFileReducer, UnstableBaselineError
+from pyrepro.reproducer.runner import CommandRunner, ExecutionResult
+from pyrepro.reproducer.workspace import ReductionWorkspace, tree_digest
 
 FAILING_PROJECT = Path(__file__).parents[2] / "examples" / "failing_project"
 

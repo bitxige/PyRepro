@@ -37,7 +37,7 @@ the candidate copy produces the same established failure signature.
 ## Package structure
 
 ```text
-reposentinel/                  # Temporary internal package name
+pyrepro/
 ├── __main__.py                # PyRepro module entry point
 ├── reproducer/
 │   ├── runner.py              # argv command execution and captured output
@@ -50,9 +50,7 @@ reposentinel/                  # Temporary internal package name
 └── path_utils.py              # retained repository-path validation
 ```
 
-The distribution and command are named `pyrepro`. The Python package remains
-`reposentinel` temporarily so that this pivot does not mix product cleanup
-with a broad mechanical import rename.
+The distribution, command, and Python package are named `pyrepro`.
 
 ## P0 responsibilities
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from reposentinel.reproducer.runner import ExecutionResult
+from pyrepro.reproducer.runner import ExecutionResult
 
 _TRACEBACK_MARKER = "Traceback (most recent call last):"
 _FRAME_PATTERN = re.compile(

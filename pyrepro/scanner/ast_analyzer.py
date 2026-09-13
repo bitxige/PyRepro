@@ -6,7 +6,7 @@ import ast
 import tokenize
 from pathlib import Path
 
-from reposentinel.path_utils import resolve_repository_file
+from pyrepro.path_utils import resolve_repository_file
 
 
 class AstAnalyzer:

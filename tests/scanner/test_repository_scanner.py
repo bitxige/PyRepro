@@ -1,7 +1,7 @@
 """Tests for repository file inventory and metadata detection."""
 
 import pytest
-from reposentinel.scanner.repository_scanner import RepositoryScanner
+from pyrepro.scanner.repository_scanner import RepositoryScanner
 
 
 def test_scanner_builds_profile(fixture_repo):

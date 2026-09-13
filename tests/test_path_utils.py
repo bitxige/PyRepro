@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pytest
-from reposentinel.path_utils import resolve_repository_file
+from pyrepro.path_utils import resolve_repository_file
 
 
 def test_resolve_repository_file_allows_internal_file_and_symlink(tmp_path: Path):

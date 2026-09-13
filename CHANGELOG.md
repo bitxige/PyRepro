@@ -15,8 +15,7 @@ experiments remain available through Git history and the experiment summary.
 
 ### Changed
 
-- Renamed the user-facing project and distribution to PyRepro while retaining
-  the temporary internal `reposentinel` Python package name.
+- Renamed the project, distribution, command, and Python package to PyRepro.
 - Reoriented current documentation, architecture, instructions, and CI toward
   command-driven failure reduction.
 - Retained the repository scanner, AST analyzer, and path utilities as future

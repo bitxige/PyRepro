@@ -42,7 +42,7 @@ class ReductionWorkspace:
             Active disposable workspace.
         """
         self._temporary_directory = tempfile.TemporaryDirectory(
-            prefix="reposentinel-reducer-"
+            prefix="pyrepro-reducer-"
         )
         self._working_root = Path(self._temporary_directory.name) / "project"
         shutil.copytree(self.source_root, self._working_root)
