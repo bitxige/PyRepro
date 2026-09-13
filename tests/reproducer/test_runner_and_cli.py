@@ -88,6 +88,28 @@ def test_module_cli_reduces_a_trusted_local_training_project(tmp_path: Path, cap
     assert (output / "reward" / "shaping.py").is_file()
 
 
+def test_module_cli_supports_message_matching_for_comparison(tmp_path: Path):
+    """Expose message-only matching without changing the strict default."""
+    output = tmp_path / "message-output"
+
+    status = main(
+        [
+            "reduce",
+            str(TRAINING_PROJECT),
+            "--output",
+            str(output),
+            "--failure-match",
+            "message",
+            "--",
+            sys.executable,
+            "train.py",
+        ]
+    )
+
+    assert status == 0
+    assert (output / "reward" / "shaping.py").is_file()
+
+
 def test_module_cli_uses_a_sibling_default_output_directory(tmp_path: Path):
     """Keep the default output outside the trusted source project."""
     source = tmp_path / "training-project"

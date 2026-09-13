@@ -7,7 +7,11 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from pyrepro.reproducer.failure import ReductionOutcome, classify_result
+from pyrepro.reproducer.failure import (
+    FailureMatchMode,
+    ReductionOutcome,
+    classify_result,
+)
 from pyrepro.reproducer.reducer import (
     DdminFileReducer,
     GreedyFileReducer,
@@ -57,6 +61,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="text that must occur in the stable baseline failure signature",
     )
     reduce_parser.add_argument(
+        "--failure-match",
+        choices=tuple(mode.value for mode in FailureMatchMode),
+        default=FailureMatchMode.STRICT.value,
+        help=(
+            "failure identity for reduction; strict is the product default, "
+            "message is for controlled comparisons"
+        ),
+    )
+    reduce_parser.add_argument(
         "--strategy",
         choices=("greedy", "ddmin"),
         default="greedy",
@@ -89,18 +102,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         reducer_type = (
             GreedyFileReducer if args.strategy == "greedy" else DdminFileReducer
         )
-        reducer = reducer_type(runner, expected_text=args.expect)
+        match_mode = FailureMatchMode(args.failure_match)
+        reducer = reducer_type(
+            runner,
+            expected_text=args.expect,
+            match_mode=match_mode,
+        )
         with ReductionWorkspace(source) as workspace:
             file_result = reducer.reduce(workspace)
             symbol_result = None
             if args.max_granularity == "symbol":
-                symbol_result = GreedySymbolReducer(runner).reduce(
-                    workspace, file_result.baseline_signature
-                )
+                symbol_result = GreedySymbolReducer(
+                    runner, match_mode=match_mode
+                ).reduce(workspace, file_result.baseline_signature)
             destination = workspace.copy_reduced_to(output)
             output_result = runner.run(destination)
             output_outcome = classify_result(
-                output_result, file_result.baseline_signature, destination
+                output_result,
+                file_result.baseline_signature,
+                destination,
+                match_mode,
             )
     except (OSError, UnstableBaselineError, ValueError) as error:
         parser.error(str(error))

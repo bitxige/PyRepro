@@ -45,6 +45,11 @@ pyrepro reduce ~/my_project \
 established failure signature before reduction begins. This prevents reduction
 from starting against an unintended baseline failure.
 
+`--failure-match strict` is the default and preserves the complete failure
+identity: exception type, normalized message, and final traceback frame. The
+`message` mode is reserved for controlled reducer comparisons; it intentionally
+does not change the default product behavior.
+
 By default, the verified output is written outside the source project at:
 
 ```text
@@ -100,8 +105,9 @@ in [docs/project-overview.md](docs/project-overview.md).
 
 Planned work after P3:
 
-- P4: static-analysis-guided candidate scheduling; and
-- P5: reproducer packaging and reporting.
+- P4: configurable failure identity and Python repository-aware candidate
+  grouping/scheduling; and
+- P5: multi-file benchmark, reproducer packaging, and reporting.
 
 ## Development
 

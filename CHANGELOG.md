@@ -25,6 +25,9 @@ experiments remain available through Git history and the experiment summary.
   execution-verified failure reduction.
 - Added a research-only competitor comparison harness and recorded executable
   baseline runs against PyRepro and external reduction tools.
+- Added source-integrity digests, three-run comparison verification, separated
+  reducer-query and verification metrics, and an experiment-only message
+  matching mode for fair reducer comparisons.
 
 ### Changed
 

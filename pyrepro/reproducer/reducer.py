@@ -10,9 +10,11 @@ from pathlib import Path
 from time import perf_counter
 
 from pyrepro.reproducer.failure import (
+    FailureMatchMode,
     FailureSignature,
     ReductionOutcome,
     classify_result,
+    signatures_match,
 )
 from pyrepro.reproducer.runner import CommandRunner
 from pyrepro.reproducer.workspace import ReductionWorkspace
@@ -98,6 +100,7 @@ class ReductionResult:
 
     strategy: str
     baseline_signature: FailureSignature
+    failure_match_mode: FailureMatchMode
     baseline_runs: int
     initial_python_files: int
     remaining_python_files: int
@@ -121,6 +124,7 @@ class GreedyFileReducer:
         runner: Command runner used for all baseline and candidate executions.
         baseline_runs: Number of equal baseline signatures required before deletion.
         expected_text: Optional text that must occur in the baseline signature.
+        match_mode: Failure identity used for candidate acceptance.
         ignored_directory_names: Directory names excluded from deletion candidates.
     """
 
@@ -129,6 +133,7 @@ class GreedyFileReducer:
         runner: CommandRunner,
         baseline_runs: int = 3,
         expected_text: str | None = None,
+        match_mode: FailureMatchMode = FailureMatchMode.STRICT,
         ignored_directory_names: Collection[str] = DEFAULT_IGNORED_DIRECTORY_NAMES,
     ) -> None:
         """Initialize the greedy reducer.
@@ -139,6 +144,7 @@ class GreedyFileReducer:
         self.runner = runner
         self.baseline_runs = _validate_baseline_runs(baseline_runs)
         self.expected_text = _normalize_expected_text(expected_text)
+        self.match_mode = match_mode
         self.ignored_directory_names = frozenset(ignored_directory_names)
 
     def reduce(self, workspace: ReductionWorkspace) -> ReductionResult:
@@ -159,6 +165,7 @@ class GreedyFileReducer:
             workspace.root,
             self.baseline_runs,
             self.expected_text,
+            self.match_mode,
         )
         candidates = _python_files(workspace.root, self.ignored_directory_names)
         initial_lines = _python_line_count(candidates)
@@ -170,7 +177,11 @@ class GreedyFileReducer:
             backup_root = Path(name)
             for candidate in candidates:
                 decision, candidate_executions = self._try_remove(
-                    workspace.root, candidate, backup_root, baseline_signature
+                    workspace.root,
+                    candidate,
+                    backup_root,
+                    baseline_signature,
+                    self.match_mode,
                 )
                 decisions.append(decision)
                 executions += candidate_executions
@@ -185,7 +196,7 @@ class GreedyFileReducer:
                 )
 
         final_outcome = _verify_final_workspace(
-            self.runner, workspace.root, baseline_signature
+            self.runner, workspace.root, baseline_signature, self.match_mode
         )
         executions += 1
         if final_outcome is not ReductionOutcome.SAME_FAILURE:
@@ -197,6 +208,7 @@ class GreedyFileReducer:
         return ReductionResult(
             strategy="greedy",
             baseline_signature=baseline_signature,
+            failure_match_mode=self.match_mode,
             baseline_runs=self.baseline_runs,
             initial_python_files=len(candidates),
             remaining_python_files=len(remaining),
@@ -219,6 +231,7 @@ class GreedyFileReducer:
         candidate: Path,
         backup_root: Path,
         baseline_signature: FailureSignature,
+        match_mode: FailureMatchMode,
     ) -> tuple[FileDecision, int]:
         relative = candidate.relative_to(workspace_root)
         backup = backup_root / relative
@@ -227,7 +240,9 @@ class GreedyFileReducer:
         candidate.unlink()
 
         result = self.runner.run(workspace_root)
-        outcome = classify_result(result, baseline_signature, workspace_root)
+        outcome = classify_result(
+            result, baseline_signature, workspace_root, match_mode
+        )
         removed = outcome is ReductionOutcome.SAME_FAILURE
         if not removed:
             shutil.copy2(backup, candidate)
@@ -241,6 +256,7 @@ class DdminFileReducer:
         runner: Command runner used for every baseline and candidate execution.
         baseline_runs: Number of equal baseline signatures required before search.
         expected_text: Optional text that must occur in the baseline signature.
+        match_mode: Failure identity used for candidate acceptance.
         ignored_directory_names: Directory names excluded from deletion candidates.
     """
 
@@ -249,6 +265,7 @@ class DdminFileReducer:
         runner: CommandRunner,
         baseline_runs: int = 3,
         expected_text: str | None = None,
+        match_mode: FailureMatchMode = FailureMatchMode.STRICT,
         ignored_directory_names: Collection[str] = DEFAULT_IGNORED_DIRECTORY_NAMES,
     ) -> None:
         """Initialize the grouped reducer.
@@ -259,6 +276,7 @@ class DdminFileReducer:
         self.runner = runner
         self.baseline_runs = _validate_baseline_runs(baseline_runs)
         self.expected_text = _normalize_expected_text(expected_text)
+        self.match_mode = match_mode
         self.ignored_directory_names = frozenset(ignored_directory_names)
 
     def reduce(self, workspace: ReductionWorkspace) -> ReductionResult:
@@ -282,6 +300,7 @@ class DdminFileReducer:
                 workspace.root,
                 self.baseline_runs,
                 self.expected_text,
+                self.match_mode,
             )
             candidates = _python_files(template_root, self.ignored_directory_names)
             initial_lines = _python_line_count(candidates)
@@ -289,15 +308,27 @@ class DdminFileReducer:
             probes: list[ProbeDecision] = []
 
             retained, grouped_probes = self._grouped_search(
-                template_root, candidates, retained, baseline_signature
+                template_root,
+                candidates,
+                retained,
+                baseline_signature,
+                self.match_mode,
             )
             probes.extend(grouped_probes)
             retained, cleanup_probes = self._greedy_cleanup(
-                template_root, candidates, retained, baseline_signature
+                template_root,
+                candidates,
+                retained,
+                baseline_signature,
+                self.match_mode,
             )
             probes.extend(cleanup_probes)
             minimality_probes = self._verify_one_minimal(
-                template_root, candidates, retained, baseline_signature
+                template_root,
+                candidates,
+                retained,
+                baseline_signature,
+                self.match_mode,
             )
             probes.extend(minimality_probes)
 
@@ -306,7 +337,10 @@ class DdminFileReducer:
                 workspace.root, candidates, retained, template_root
             )
             final_outcome = _verify_final_workspace(
-                self.runner, workspace.root, baseline_signature
+                self.runner,
+                workspace.root,
+                baseline_signature,
+                self.match_mode,
             )
             if final_outcome is not ReductionOutcome.SAME_FAILURE:
                 raise UnstableBaselineError(
@@ -319,6 +353,7 @@ class DdminFileReducer:
         return ReductionResult(
             strategy="ddmin",
             baseline_signature=baseline_signature,
+            failure_match_mode=self.match_mode,
             baseline_runs=self.baseline_runs,
             initial_python_files=len(candidates),
             remaining_python_files=len(remaining),
@@ -341,6 +376,7 @@ class DdminFileReducer:
         candidates: Sequence[Path],
         retained: tuple[Path, ...],
         baseline_signature: FailureSignature,
+        match_mode: FailureMatchMode,
     ) -> tuple[tuple[Path, ...], list[ProbeDecision]]:
         granularity = 2
         probes: list[ProbeDecision] = []
@@ -349,7 +385,11 @@ class DdminFileReducer:
             accepted_retained: tuple[Path, ...] | None = None
             for group in groups:
                 outcome = self._probe_retained(
-                    workspace_root, candidates, group, baseline_signature
+                    workspace_root,
+                    candidates,
+                    group,
+                    baseline_signature,
+                    match_mode,
                 )
                 accepted = outcome is ReductionOutcome.SAME_FAILURE
                 probes.append(_probe_decision("subset", group, outcome, accepted))
@@ -360,7 +400,11 @@ class DdminFileReducer:
                 for group in groups:
                     complement = tuple(path for path in retained if path not in group)
                     outcome = self._probe_retained(
-                        workspace_root, candidates, complement, baseline_signature
+                        workspace_root,
+                        candidates,
+                        complement,
+                        baseline_signature,
+                        match_mode,
                     )
                     accepted = outcome is ReductionOutcome.SAME_FAILURE
                     probes.append(
@@ -384,6 +428,7 @@ class DdminFileReducer:
         candidates: Sequence[Path],
         retained: tuple[Path, ...],
         baseline_signature: FailureSignature,
+        match_mode: FailureMatchMode,
     ) -> tuple[tuple[Path, ...], list[ProbeDecision]]:
         probes: list[ProbeDecision] = []
         for candidate in tuple(retained):
@@ -391,7 +436,11 @@ class DdminFileReducer:
                 continue
             proposed = tuple(path for path in retained if path != candidate)
             outcome = self._probe_retained(
-                workspace_root, candidates, proposed, baseline_signature
+                workspace_root,
+                candidates,
+                proposed,
+                baseline_signature,
+                match_mode,
             )
             accepted = outcome is ReductionOutcome.SAME_FAILURE
             probes.append(_probe_decision("cleanup", proposed, outcome, accepted))
@@ -405,12 +454,17 @@ class DdminFileReducer:
         candidates: Sequence[Path],
         retained: tuple[Path, ...],
         baseline_signature: FailureSignature,
+        match_mode: FailureMatchMode,
     ) -> list[ProbeDecision]:
         probes: list[ProbeDecision] = []
         for candidate in retained:
             proposed = tuple(path for path in retained if path != candidate)
             outcome = self._probe_retained(
-                workspace_root, candidates, proposed, baseline_signature
+                workspace_root,
+                candidates,
+                proposed,
+                baseline_signature,
+                match_mode,
             )
             probe = _probe_decision("minimality", proposed, outcome, False)
             probes.append(probe)
@@ -424,6 +478,7 @@ class DdminFileReducer:
         candidates: Sequence[Path],
         retained: Sequence[Path],
         baseline_signature: FailureSignature,
+        match_mode: FailureMatchMode,
     ) -> ReductionOutcome:
         retained_set = set(retained)
         with tempfile.TemporaryDirectory(prefix="pyrepro-ddmin-probe-") as name:
@@ -433,7 +488,7 @@ class DdminFileReducer:
                 probe_root, candidates, retained_set, workspace_root
             )
             result = self.runner.run(probe_root)
-            return classify_result(result, baseline_signature, probe_root)
+            return classify_result(result, baseline_signature, probe_root, match_mode)
 
 
 def format_reduction_summary(result: ReductionResult) -> str:
@@ -450,6 +505,7 @@ def format_reduction_summary(result: ReductionResult) -> str:
         "--------",
         result.baseline_signature.describe(),
         f"Stable: {result.baseline_runs}/{result.baseline_runs}",
+        f"Failure match: {result.failure_match_mode.value}",
         "",
         "Reduction",
         "---------",
@@ -500,6 +556,7 @@ def _establish_baseline(
     workspace_root: Path,
     baseline_runs: int,
     expected_text: str | None,
+    match_mode: FailureMatchMode = FailureMatchMode.STRICT,
 ) -> tuple[FailureSignature, int]:
     signatures: list[FailureSignature] = []
     for _ in range(baseline_runs):
@@ -508,7 +565,10 @@ def _establish_baseline(
         if signature is None:
             raise UnstableBaselineError("baseline is not an uncaught Python failure")
         signatures.append(signature)
-    if len(set(signatures)) != 1:
+    if any(
+        not _signatures_match(signature, signatures[0], match_mode)
+        for signature in signatures[1:]
+    ):
         raise UnstableBaselineError("baseline failure signature is unstable")
     baseline = signatures[0]
     if expected_text is not None and expected_text not in baseline.describe():
@@ -522,9 +582,18 @@ def _verify_final_workspace(
     runner: CommandRunner,
     workspace_root: Path,
     baseline_signature: FailureSignature,
+    match_mode: FailureMatchMode = FailureMatchMode.STRICT,
 ) -> ReductionOutcome:
     result = runner.run(workspace_root)
-    return classify_result(result, baseline_signature, workspace_root)
+    return classify_result(result, baseline_signature, workspace_root, match_mode)
+
+
+def _signatures_match(
+    candidate: FailureSignature,
+    baseline: FailureSignature,
+    match_mode: FailureMatchMode,
+) -> bool:
+    return signatures_match(candidate, baseline, match_mode)
 
 
 def _apply_retained_candidates(
