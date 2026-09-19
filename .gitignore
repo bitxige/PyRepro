@@ -57,5 +57,6 @@ docs/_build/
 .DS_Store
 Thumbs.db
 
-# Generated RepoSentinel reports
+# Generated PyRepro reports and local patch exports
 reports/
+handoff/*.patch
