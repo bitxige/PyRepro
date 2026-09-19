@@ -1,7 +1,7 @@
 # PyRepro Change Log
 
 All notable current changes are documented here. Earlier RepoSentinel review
-experiments remain available through Git history and the experiment summary.
+experiments remain available through Git history.
 
 ## [Unreleased]
 
@@ -42,5 +42,7 @@ experiments remain available through Git history and the experiment summary.
 
 ### Removed
 
+- Removed retired RepoSentinel review ADRs, experiment documentation, and
+  local review-era handoff artifacts after the PyRepro product pivot.
 - Retired the Codex/MCP review runtime, review profile CLI, review evaluation
   materials, and their dedicated dependencies and tests from the mainline.
