@@ -122,6 +122,25 @@ def classify_result(
     return ReductionOutcome.DIFFERENT_FAILURE
 
 
+def exception_details(result: ExecutionResult) -> tuple[str, str] | None:
+    """Extract the final exception type and message for observability.
+
+    This helper intentionally does not participate in failure classification.
+    It can describe a nonzero command result even when its traceback lacks an
+    in-workspace frame and therefore cannot form a ``FailureSignature``.
+
+    Args:
+        result: Captured command result.
+
+    Returns:
+        The final exception type and message from stderr, or ``None`` when no
+        supported exception line is available.
+    """
+    if result.timed_out or result.return_code == 0:
+        return None
+    return _last_exception(result.stderr)
+
+
 def signatures_match(
     candidate: FailureSignature | None,
     baseline: FailureSignature,

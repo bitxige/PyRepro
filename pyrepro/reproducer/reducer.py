@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from collections import Counter
 from collections.abc import Collection, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from time import perf_counter
 
@@ -14,9 +15,10 @@ from pyrepro.reproducer.failure import (
     FailureSignature,
     ReductionOutcome,
     classify_result,
+    exception_details,
     signatures_match,
 )
-from pyrepro.reproducer.runner import CommandRunner
+from pyrepro.reproducer.runner import CommandRunner, ExecutionResult
 from pyrepro.reproducer.workspace import ReductionWorkspace
 
 DEFAULT_IGNORED_DIRECTORY_NAMES = frozenset(
@@ -76,6 +78,39 @@ class ProbeDecision:
 
 
 @dataclass(frozen=True)
+class ProbeRecord:
+    """Structured observation for one candidate command execution.
+
+    ``candidate_paths`` identifies the proposal evaluated by the reducer. For
+    greedy reduction it contains the file proposed for removal. For grouped
+    reduction it contains the files proposed to remain in the candidate
+    workspace.
+
+    Attributes:
+        phase: Reduction phase that issued the probe.
+        candidate_paths: Repository-relative paths describing the proposal.
+        outcome: Oracle result; it remains the sole acceptance authority.
+        accepted: Whether the reducer accepted the proposal.
+        duration_seconds: Elapsed command execution time, excluding workspace
+            copy or restore work.
+        return_code: Process exit status, or ``None`` after timeout.
+        exception_type: Parsed final stderr exception type, when available.
+        exception_message: Parsed final stderr exception message, when available.
+        failure_signature: Parsed complete failure signature, when available.
+    """
+
+    phase: str
+    candidate_paths: tuple[str, ...]
+    outcome: ReductionOutcome
+    accepted: bool
+    duration_seconds: float
+    return_code: int | None
+    exception_type: str | None
+    exception_message: str | None
+    failure_signature: FailureSignature | None
+
+
+@dataclass(frozen=True)
 class ReductionResult:
     """Verified result of one file-reduction run.
 
@@ -95,6 +130,7 @@ class ReductionResult:
         wall_clock_seconds: Duration from first baseline run through final check.
         decisions: Per-file greedy decisions, when the strategy emits them.
         probes: Grouped, cleanup, and minimality probe decisions.
+        probe_records: Structured command observations for every candidate probe.
         source_unchanged: Whether the protected source tree retained its digest.
     """
 
@@ -114,6 +150,7 @@ class ReductionResult:
     wall_clock_seconds: float
     decisions: tuple[FileDecision, ...]
     probes: tuple[ProbeDecision, ...]
+    probe_records: tuple[ProbeRecord, ...]
     source_unchanged: bool
 
 
@@ -171,12 +208,13 @@ class GreedyFileReducer:
         initial_lines = _python_line_count(candidates)
         decisions: list[FileDecision] = []
         probes: list[ProbeDecision] = []
+        probe_records: list[ProbeRecord] = []
         accepted_probes = 0
 
         with tempfile.TemporaryDirectory(prefix="pyrepro-reducer-backups-") as name:
             backup_root = Path(name)
             for candidate in candidates:
-                decision, candidate_executions = self._try_remove(
+                decision, probe_record, candidate_executions = self._try_remove(
                     workspace.root,
                     candidate,
                     backup_root,
@@ -184,6 +222,7 @@ class GreedyFileReducer:
                     self.match_mode,
                 )
                 decisions.append(decision)
+                probe_records.append(probe_record)
                 executions += candidate_executions
                 accepted_probes += int(decision.removed)
                 probes.append(
@@ -222,6 +261,7 @@ class GreedyFileReducer:
             wall_clock_seconds=perf_counter() - started_at,
             decisions=tuple(decisions),
             probes=tuple(probes),
+            probe_records=tuple(probe_records),
             source_unchanged=workspace.source_is_unchanged(),
         )
 
@@ -232,21 +272,35 @@ class GreedyFileReducer:
         backup_root: Path,
         baseline_signature: FailureSignature,
         match_mode: FailureMatchMode,
-    ) -> tuple[FileDecision, int]:
+    ) -> tuple[FileDecision, ProbeRecord, int]:
         relative = candidate.relative_to(workspace_root)
         backup = backup_root / relative
         backup.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(candidate, backup)
         candidate.unlink()
 
+        started_at = perf_counter()
         result = self.runner.run(workspace_root)
+        duration_seconds = perf_counter() - started_at
         outcome = classify_result(
             result, baseline_signature, workspace_root, match_mode
         )
         removed = outcome is ReductionOutcome.SAME_FAILURE
         if not removed:
             shutil.copy2(backup, candidate)
-        return FileDecision(relative.as_posix(), outcome, removed), 1
+        return (
+            FileDecision(relative.as_posix(), outcome, removed),
+            _probe_record(
+                "greedy",
+                (relative,),
+                result,
+                outcome,
+                removed,
+                duration_seconds,
+                workspace_root,
+            ),
+            1,
+        )
 
 
 class DdminFileReducer:
@@ -306,8 +360,9 @@ class DdminFileReducer:
             initial_lines = _python_line_count(candidates)
             retained = tuple(candidates)
             probes: list[ProbeDecision] = []
+            probe_records: list[ProbeRecord] = []
 
-            retained, grouped_probes = self._grouped_search(
+            retained, grouped_probes, grouped_records = self._grouped_search(
                 template_root,
                 candidates,
                 retained,
@@ -315,7 +370,8 @@ class DdminFileReducer:
                 self.match_mode,
             )
             probes.extend(grouped_probes)
-            retained, cleanup_probes = self._greedy_cleanup(
+            probe_records.extend(grouped_records)
+            retained, cleanup_probes, cleanup_records = self._greedy_cleanup(
                 template_root,
                 candidates,
                 retained,
@@ -323,7 +379,8 @@ class DdminFileReducer:
                 self.match_mode,
             )
             probes.extend(cleanup_probes)
-            minimality_probes = self._verify_one_minimal(
+            probe_records.extend(cleanup_records)
+            minimality_probes, minimality_records = self._verify_one_minimal(
                 template_root,
                 candidates,
                 retained,
@@ -331,6 +388,7 @@ class DdminFileReducer:
                 self.match_mode,
             )
             probes.extend(minimality_probes)
+            probe_records.extend(minimality_records)
 
             _restore_workspace_from_template(workspace.root, template_root)
             _apply_retained_candidates(
@@ -367,6 +425,7 @@ class DdminFileReducer:
             wall_clock_seconds=perf_counter() - started_at,
             decisions=(),
             probes=tuple(probes),
+            probe_records=tuple(probe_records),
             source_unchanged=workspace.source_is_unchanged(),
         )
 
@@ -377,39 +436,44 @@ class DdminFileReducer:
         retained: tuple[Path, ...],
         baseline_signature: FailureSignature,
         match_mode: FailureMatchMode,
-    ) -> tuple[tuple[Path, ...], list[ProbeDecision]]:
+    ) -> tuple[tuple[Path, ...], list[ProbeDecision], list[ProbeRecord]]:
         granularity = 2
         probes: list[ProbeDecision] = []
+        records: list[ProbeRecord] = []
         while len(retained) >= 2:
             groups = _partition(retained, granularity)
             accepted_retained: tuple[Path, ...] | None = None
             for group in groups:
-                outcome = self._probe_retained(
+                outcome, record = self._probe_retained(
                     workspace_root,
                     candidates,
                     group,
                     baseline_signature,
                     match_mode,
+                    "subset",
                 )
                 accepted = outcome is ReductionOutcome.SAME_FAILURE
                 probes.append(_probe_decision("subset", group, outcome, accepted))
+                records.append(_with_acceptance(record, accepted))
                 if accepted:
                     accepted_retained = group
                     break
             if accepted_retained is None:
                 for group in groups:
                     complement = tuple(path for path in retained if path not in group)
-                    outcome = self._probe_retained(
+                    outcome, record = self._probe_retained(
                         workspace_root,
                         candidates,
                         complement,
                         baseline_signature,
                         match_mode,
+                        "complement",
                     )
                     accepted = outcome is ReductionOutcome.SAME_FAILURE
                     probes.append(
                         _probe_decision("complement", complement, outcome, accepted)
                     )
+                    records.append(_with_acceptance(record, accepted))
                     if accepted:
                         accepted_retained = complement
                         break
@@ -420,7 +484,7 @@ class DdminFileReducer:
                 break
             else:
                 granularity = min(len(retained), granularity * 2)
-        return retained, probes
+        return retained, probes, records
 
     def _greedy_cleanup(
         self,
@@ -429,24 +493,27 @@ class DdminFileReducer:
         retained: tuple[Path, ...],
         baseline_signature: FailureSignature,
         match_mode: FailureMatchMode,
-    ) -> tuple[tuple[Path, ...], list[ProbeDecision]]:
+    ) -> tuple[tuple[Path, ...], list[ProbeDecision], list[ProbeRecord]]:
         probes: list[ProbeDecision] = []
+        records: list[ProbeRecord] = []
         for candidate in tuple(retained):
             if candidate not in retained:
                 continue
             proposed = tuple(path for path in retained if path != candidate)
-            outcome = self._probe_retained(
+            outcome, record = self._probe_retained(
                 workspace_root,
                 candidates,
                 proposed,
                 baseline_signature,
                 match_mode,
+                "cleanup",
             )
             accepted = outcome is ReductionOutcome.SAME_FAILURE
             probes.append(_probe_decision("cleanup", proposed, outcome, accepted))
+            records.append(_with_acceptance(record, accepted))
             if accepted:
                 retained = proposed
-        return retained, probes
+        return retained, probes, records
 
     def _verify_one_minimal(
         self,
@@ -455,22 +522,25 @@ class DdminFileReducer:
         retained: tuple[Path, ...],
         baseline_signature: FailureSignature,
         match_mode: FailureMatchMode,
-    ) -> list[ProbeDecision]:
+    ) -> tuple[list[ProbeDecision], list[ProbeRecord]]:
         probes: list[ProbeDecision] = []
+        records: list[ProbeRecord] = []
         for candidate in retained:
             proposed = tuple(path for path in retained if path != candidate)
-            outcome = self._probe_retained(
+            outcome, record = self._probe_retained(
                 workspace_root,
                 candidates,
                 proposed,
                 baseline_signature,
                 match_mode,
+                "minimality",
             )
             probe = _probe_decision("minimality", proposed, outcome, False)
             probes.append(probe)
+            records.append(record)
             if outcome is ReductionOutcome.SAME_FAILURE:
                 raise UnstableBaselineError("final grouped reduction is not 1-minimal")
-        return probes
+        return probes, records
 
     def _probe_retained(
         self,
@@ -479,7 +549,8 @@ class DdminFileReducer:
         retained: Sequence[Path],
         baseline_signature: FailureSignature,
         match_mode: FailureMatchMode,
-    ) -> ReductionOutcome:
+        phase: str,
+    ) -> tuple[ReductionOutcome, ProbeRecord]:
         retained_set = set(retained)
         with tempfile.TemporaryDirectory(prefix="pyrepro-ddmin-probe-") as name:
             probe_root = Path(name) / "project"
@@ -487,8 +558,22 @@ class DdminFileReducer:
             _apply_retained_candidates(
                 probe_root, candidates, retained_set, workspace_root
             )
+            started_at = perf_counter()
             result = self.runner.run(probe_root)
-            return classify_result(result, baseline_signature, probe_root, match_mode)
+            duration_seconds = perf_counter() - started_at
+            outcome = classify_result(
+                result, baseline_signature, probe_root, match_mode
+            )
+            return outcome, _probe_record(
+                phase,
+                retained,
+                result,
+                outcome,
+                False,
+                duration_seconds,
+                probe_root,
+                workspace_root,
+            )
 
 
 def format_reduction_summary(result: ReductionResult) -> str:
@@ -533,7 +618,36 @@ def format_reduction_summary(result: ReductionResult) -> str:
             "Final verification: SAME_FAILURE",
         ]
     )
+    lines.extend(_format_probe_telemetry_summary(result.probe_records))
     return "\n".join(lines)
+
+
+def _format_probe_telemetry_summary(records: Sequence[ProbeRecord]) -> list[str]:
+    """Format a compact probe-outcome breakdown for the command-line summary."""
+    different_failures = Counter(
+        record.exception_type or "unparsed"
+        for record in records
+        if record.outcome is ReductionOutcome.DIFFERENT_FAILURE
+    )
+    timeout_count = sum(
+        record.outcome is ReductionOutcome.TIMEOUT for record in records
+    )
+    lines = [
+        "",
+        "Probe telemetry",
+        "---------------",
+        f"Records: {len(records)}",
+        f"Timeout probes: {timeout_count}",
+        "Different failures:",
+    ]
+    if different_failures:
+        lines.extend(
+            f"{exception_type}: {count}"
+            for exception_type, count in sorted(different_failures.items())
+        )
+    else:
+        lines.append("none")
+    return lines
 
 
 def _validate_baseline_runs(baseline_runs: int) -> int:
@@ -630,6 +744,47 @@ def _probe_decision(
         outcome=outcome,
         accepted=accepted,
     )
+
+
+def _probe_record(
+    phase: str,
+    candidate_paths: Sequence[Path],
+    result: ExecutionResult,
+    outcome: ReductionOutcome,
+    accepted: bool,
+    duration_seconds: float,
+    signature_workspace_root: Path,
+    candidate_root: Path | None = None,
+) -> ProbeRecord:
+    """Build telemetry without changing an already-classified oracle outcome."""
+    source_root = candidate_root or signature_workspace_root
+    details = exception_details(result)
+    exception_type, exception_message = details or (None, None)
+    return ProbeRecord(
+        phase=phase,
+        candidate_paths=tuple(
+            (
+                path.relative_to(source_root).as_posix()
+                if path.is_absolute()
+                else path.as_posix()
+            )
+            for path in candidate_paths
+        ),
+        outcome=outcome,
+        accepted=accepted,
+        duration_seconds=duration_seconds,
+        return_code=result.return_code,
+        exception_type=exception_type,
+        exception_message=exception_message,
+        failure_signature=FailureSignature.from_result(
+            result, signature_workspace_root
+        ),
+    )
+
+
+def _with_acceptance(record: ProbeRecord, accepted: bool) -> ProbeRecord:
+    """Return a record with the reducer's existing acceptance decision applied."""
+    return replace(record, accepted=accepted)
 
 
 def _partition(paths: Sequence[Path], granularity: int) -> tuple[tuple[Path, ...], ...]:

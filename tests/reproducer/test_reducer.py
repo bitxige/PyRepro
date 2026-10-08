@@ -15,6 +15,7 @@ from pyrepro.reproducer.reducer import (
     GreedyFileReducer,
     UnstableBaselineError,
     _partition,
+    _probe_record,
 )
 from pyrepro.reproducer.runner import CommandRunner, ExecutionResult
 from pyrepro.reproducer.workspace import ReductionWorkspace, tree_digest
@@ -47,6 +48,28 @@ def test_reducer_removes_ballast_preserves_failure_and_source(tmp_path: Path):
     assert result.source_unchanged
     assert model_decision.outcome is ReductionOutcome.DIFFERENT_FAILURE
     assert not model_decision.removed
+    assert len(result.probe_records) == result.candidate_attempts
+    assert result.accepted_probes == sum(
+        record.accepted for record in result.probe_records
+    )
+    assert result.rejected_probes == sum(
+        not record.accepted for record in result.probe_records
+    )
+    assert all(
+        record.failure_signature == result.baseline_signature
+        for record in result.probe_records
+        if record.accepted
+    )
+    model_record = next(
+        record
+        for record in result.probe_records
+        if record.candidate_paths == ("app/model.py",)
+    )
+    assert model_record.outcome is model_decision.outcome
+    assert not model_record.accepted
+    assert model_record.duration_seconds >= 0
+    assert model_record.return_code != 0
+    assert model_record.exception_type is not None
     assert tree_digest(FAILING_PROJECT) == source_digest
     remaining_python_files = {
         path.relative_to(destination).as_posix() for path in destination.rglob("*.py")
@@ -132,6 +155,13 @@ def test_ddmin_reducer_preserves_p0_failure_and_counts_minimality_probes(
     assert result.baseline_signature == final_signature
     assert result.executions == result.baseline_runs + result.candidate_attempts + 1
     assert result.candidate_attempts == len(result.probes)
+    assert result.candidate_attempts == len(result.probe_records)
+    assert [record.outcome for record in result.probe_records] == [
+        probe.outcome for probe in result.probes
+    ]
+    assert [record.accepted for record in result.probe_records] == [
+        probe.accepted for probe in result.probes
+    ]
     assert result.initial_python_lines > result.remaining_python_lines
     assert result.removed_candidate_files == (
         result.initial_python_files - result.remaining_python_files
@@ -223,6 +253,7 @@ def test_ddmin_removes_the_coupled_pair_that_greedy_retains(tmp_path: Path):
     assert ddmin_result.executions == (
         ddmin_result.baseline_runs + ddmin_result.candidate_attempts + 1
     )
+    assert ddmin_result.candidate_attempts == len(ddmin_result.probe_records)
     assert len(ddmin_minimality_probes) == ddmin_result.remaining_python_files
     assert all(
         probe.outcome is not ReductionOutcome.SAME_FAILURE
@@ -230,6 +261,92 @@ def test_ddmin_removes_the_coupled_pair_that_greedy_retains(tmp_path: Path):
     )
     assert ddmin_result.source_unchanged
     assert greedy_result.source_unchanged
+
+
+@pytest.mark.parametrize(
+    (
+        "result",
+        "outcome",
+        "accepted",
+        "expected_exception",
+        "expected_message",
+        "has_signature",
+    ),
+    (
+        (
+            ExecutionResult(
+                ("python", "reproduce.py"),
+                1,
+                "",
+                "",
+                False,
+            ),
+            ReductionOutcome.SAME_FAILURE,
+            True,
+            None,
+            None,
+            False,
+        ),
+        (
+            ExecutionResult(
+                ("python", "reproduce.py"),
+                1,
+                "",
+                "ModuleNotFoundError: No module named 'removed_module'\n",
+                False,
+            ),
+            ReductionOutcome.DIFFERENT_FAILURE,
+            False,
+            "ModuleNotFoundError",
+            "No module named 'removed_module'",
+            False,
+        ),
+        (
+            ExecutionResult(("python", "reproduce.py"), 0, "", "", False),
+            ReductionOutcome.PASS,
+            False,
+            None,
+            None,
+            False,
+        ),
+        (
+            ExecutionResult(("python", "reproduce.py"), None, "", "", True),
+            ReductionOutcome.TIMEOUT,
+            False,
+            None,
+            None,
+            False,
+        ),
+    ),
+)
+def test_probe_record_captures_all_oracle_outcomes(
+    tmp_path: Path,
+    result: ExecutionResult,
+    outcome: ReductionOutcome,
+    accepted: bool,
+    expected_exception: str | None,
+    expected_message: str | None,
+    has_signature: bool,
+):
+    """Keep telemetry descriptive for every existing oracle outcome."""
+    record = _probe_record(
+        "greedy",
+        (tmp_path / "candidate.py",),
+        result,
+        outcome,
+        accepted,
+        0.125,
+        tmp_path,
+    )
+
+    assert record.candidate_paths == ("candidate.py",)
+    assert record.outcome is outcome
+    assert record.accepted is accepted
+    assert record.duration_seconds == 0.125
+    assert record.return_code == result.return_code
+    assert record.exception_type == expected_exception
+    assert record.exception_message == expected_message
+    assert (record.failure_signature is not None) is has_signature
 
 
 def _outcome_after_removing(
