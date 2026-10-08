@@ -1,0 +1,10 @@
+diff --git a/tactics2d/map/generator/road_segment/two_way.py b/tactics2d/map/generator/road_segment/two_way.py
+index 9f0925c..a580710 100644
+--- a/tactics2d/map/generator/road_segment/two_way.py
++++ b/tactics2d/map/generator/road_segment/two_way.py
+@@ -89,3 +89,3 @@ class TwoWay(RoadSegment):
+-        if forward_n < 1:
++        if forward_n < 2:
+             raise ValueError("forward_lane_num must be >= 1.")
+         if backward_n < 1:
+             raise ValueError("backward_lane_num must be >= 1 for two_way roads.")
