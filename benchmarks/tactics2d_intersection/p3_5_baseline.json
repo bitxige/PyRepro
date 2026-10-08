@@ -1,0 +1,39 @@
+{
+  "benchmark": "Tactics2D Large-Repository Controlled Benchmark",
+  "tactics2d_commit": "23d81691fd1c297c987918d7936f9b3db123a696",
+  "controlled_patch": "controlled.patch",
+  "reproduction_adapter": "adapter.py",
+  "failure_match": "strict",
+  "timeout_seconds": 15,
+  "baseline_failure": {
+    "exception_type": "ValueError",
+    "message": "forward_lane_num must be >= 1.",
+    "file": "tactics2d/map/generator/road_segment/two_way.py",
+    "function": "build",
+    "stable_runs": 3
+  },
+  "input": {
+    "eligible_python_files": 246,
+    "eligible_python_lines": 66892,
+    "workspace_copy_seconds": 1.066,
+    "baseline_seconds": 10.211
+  },
+  "p3_5_greedy_file_result": {
+    "strategy": "greedy",
+    "max_granularity": "file",
+    "remaining_python_files": 87,
+    "removed_python_files": 159,
+    "remaining_python_lines": 20846,
+    "removed_python_lines": 46046,
+    "oracle_executions": 250,
+    "candidate_attempts": 246,
+    "accepted_probes": 159,
+    "rejected_probes": 87,
+    "timeout_probes": 0,
+    "wall_clock_seconds": 363.594,
+    "failure_preserved": true,
+    "final_verification_stable_runs": 3,
+    "source_unchanged": true,
+    "different_failure_breakdown": "unavailable"
+  }
+}
