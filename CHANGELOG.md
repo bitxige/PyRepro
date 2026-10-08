@@ -7,6 +7,9 @@ experiments remain available through Git history.
 
 ### Added
 
+- Added structured per-probe telemetry for file reduction, including command
+  duration, exit status, parsed exception details, failure signatures, and a
+  compact command-line breakdown of different failures and timeouts.
 - Added P2 grouped/ddmin-inspired file reduction with fresh candidate probes,
   greedy cleanup, explicit 1-minimal verification, and execution-cost metrics.
 - Added a deterministic 33-file grouped-failure benchmark that distinguishes

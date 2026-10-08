@@ -59,6 +59,8 @@ def test_module_cli_writes_a_verified_reduced_project(tmp_path: Path, capsys):
     assert status == 0
     assert "Stable: 3/3" in captured.out
     assert "Original modified: no" in captured.out
+    assert "Probe telemetry" in captured.out
+    assert "Different failures:" in captured.out
     assert (output / "reproduce.py").is_file()
 
 

@@ -7,6 +7,7 @@ from pyrepro.reproducer.failure import (
     FailureSignature,
     ReductionOutcome,
     classify_result,
+    exception_details,
 )
 from pyrepro.reproducer.runner import ExecutionResult
 
@@ -57,6 +58,25 @@ def test_classification_reports_pass_and_timeout(tmp_path: Path):
 
     assert classify_result(passed, baseline, tmp_path) is ReductionOutcome.PASS
     assert classify_result(timed_out, baseline, tmp_path) is ReductionOutcome.TIMEOUT
+    assert exception_details(passed) is None
+    assert exception_details(timed_out) is None
+
+
+def test_exception_details_describes_a_non_signature_different_failure(tmp_path: Path):
+    """Retain a concrete exception type even without a workspace traceback frame."""
+    result = ExecutionResult(
+        ("python", "reproduce.py"),
+        1,
+        "",
+        "ModuleNotFoundError: No module named 'removed_module'\n",
+        False,
+    )
+
+    assert FailureSignature.from_result(result, tmp_path) is None
+    assert exception_details(result) == (
+        "ModuleNotFoundError",
+        "No module named 'removed_module'",
+    )
 
 
 def test_message_matching_mode_ignores_traceback_frame(tmp_path: Path):
