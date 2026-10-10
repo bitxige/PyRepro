@@ -97,6 +97,10 @@ class ProbeRecord:
         exception_type: Parsed final stderr exception type, when available.
         exception_message: Parsed final stderr exception message, when available.
         failure_signature: Parsed complete failure signature, when available.
+        candidate_python_lines: Eligible physical Python lines in the candidate
+            workspace proposed by this probe. For a rejected proposal, this is
+            intentionally the attempted candidate state rather than the
+            reducer's retained state.
     """
 
     phase: str
@@ -108,6 +112,7 @@ class ProbeRecord:
     exception_type: str | None
     exception_message: str | None
     failure_signature: FailureSignature | None
+    candidate_python_lines: int | None = None
 
 
 @dataclass(frozen=True)
@@ -210,10 +215,12 @@ class GreedyFileReducer:
         probes: list[ProbeDecision] = []
         probe_records: list[ProbeRecord] = []
         accepted_probes = 0
+        retained_lines = initial_lines
 
         with tempfile.TemporaryDirectory(prefix="pyrepro-reducer-backups-") as name:
             backup_root = Path(name)
             for candidate in candidates:
+                candidate_lines = _physical_line_count(candidate.read_bytes())
                 decision, probe_record, candidate_executions = self._try_remove(
                     workspace.root,
                     candidate,
@@ -222,9 +229,14 @@ class GreedyFileReducer:
                     self.match_mode,
                 )
                 decisions.append(decision)
-                probe_records.append(probe_record)
+                proposed_lines = retained_lines - candidate_lines
+                probe_records.append(
+                    _with_candidate_python_lines(probe_record, proposed_lines)
+                )
                 executions += candidate_executions
                 accepted_probes += int(decision.removed)
+                if decision.removed:
+                    retained_lines = proposed_lines
                 probes.append(
                     ProbeDecision(
                         phase="greedy",
@@ -573,6 +585,7 @@ class DdminFileReducer:
                 duration_seconds,
                 probe_root,
                 workspace_root,
+                _python_line_count(retained),
             )
 
 
@@ -755,6 +768,7 @@ def _probe_record(
     duration_seconds: float,
     signature_workspace_root: Path,
     candidate_root: Path | None = None,
+    candidate_python_lines: int | None = None,
 ) -> ProbeRecord:
     """Build telemetry without changing an already-classified oracle outcome."""
     source_root = candidate_root or signature_workspace_root
@@ -779,12 +793,20 @@ def _probe_record(
         failure_signature=FailureSignature.from_result(
             result, signature_workspace_root
         ),
+        candidate_python_lines=candidate_python_lines,
     )
 
 
 def _with_acceptance(record: ProbeRecord, accepted: bool) -> ProbeRecord:
     """Return a record with the reducer's existing acceptance decision applied."""
     return replace(record, accepted=accepted)
+
+
+def _with_candidate_python_lines(
+    record: ProbeRecord, candidate_python_lines: int
+) -> ProbeRecord:
+    """Return telemetry annotated with the proposed candidate's Python LOC."""
+    return replace(record, candidate_python_lines=candidate_python_lines)
 
 
 def _partition(paths: Sequence[Path], granularity: int) -> tuple[tuple[Path, ...], ...]:

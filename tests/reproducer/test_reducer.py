@@ -347,6 +347,7 @@ def test_probe_record_captures_all_oracle_outcomes(
     assert record.exception_type == expected_exception
     assert record.exception_message == expected_message
     assert (record.failure_signature is not None) is has_signature
+    assert record.candidate_python_lines is None
 
 
 def _outcome_after_removing(
