@@ -6,8 +6,15 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import Protocol
 
-from pyrepro.reproducer.reducer import ProbeRecord, ReductionResult
+from pyrepro.reproducer.reducer import ProbeRecord
+
+
+class _HasProbeRecords(Protocol):
+    """Completed operation that exposes structured probe telemetry."""
+
+    probe_records: tuple[ProbeRecord, ...]
 
 
 def validate_probe_report_path(path: Path, source_root: Path) -> Path:
@@ -40,8 +47,8 @@ def validate_probe_report_path(path: Path, source_root: Path) -> Path:
     return destination
 
 
-def write_probe_records(destination: Path, result: ReductionResult) -> None:
-    """Atomically create one JSON object per file-reduction probe.
+def write_probe_records(destination: Path, result: _HasProbeRecords) -> None:
+    """Atomically create one JSON object per execution-verified probe.
 
     ``elapsed_seconds`` is the cumulative command-execution duration rather
     than reducer wall-clock time. This isolates Oracle cost from workspace I/O.
@@ -51,7 +58,7 @@ def write_probe_records(destination: Path, result: ReductionResult) -> None:
 
     Args:
         destination: Validated, non-existing JSONL output path.
-        result: Completed file-reduction result containing probe records.
+        result: Completed operation containing probe records.
 
     Raises:
         OSError: If the report cannot be created. Existing destinations are
@@ -97,6 +104,7 @@ def _record_as_json(
         "probe_id": probe_id,
         "phase": record.phase,
         "candidate": list(record.candidate_paths),
+        "candidate_details": list(record.candidate_descriptions),
         "outcome": record.outcome.value,
         "accepted": record.accepted,
         "duration_seconds": record.duration_seconds,

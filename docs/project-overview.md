@@ -33,7 +33,7 @@ PyRepro 是一个面向 Python 项目运行故障的自动复现缩减工具。�
 通过“删减后是否仍复现同一故障”的可执行判据进行搜索。完整决策记录见
 [`0007-pivot-to-failure-reduction.md`](decisions/0007-pivot-to-failure-reduction.md)。
 
-## 当前 P5.2a/b
+## 当前 P5.2c
 
 P1 将 P0 的最小闭环扩展到开发者明确选择的可信本地项目：
 
@@ -67,6 +67,13 @@ P5.2a/b 在显式 pytest node ID 下将候选范围收窄到目标测试函数�
 携带需要同步更新的行号；明显 import-time side effect 的候选携带风险标记，仍必须
 由后续 Oracle 验证。该阶段同样不执行命令或修改源码。
 
+P5.2c 将上述候选转换为受限、可回滚的动态验证操作。它仅在临时工作副本中建立三次
+稳定 baseline，再优先批量修改简单的单行顶层 import；批量失败后完整还原，并在
+`--max-import-probes` 上限内二分。带风险标记的候选与普通候选分组处理，仍只能在 strict
+failure oracle 确认同一故障后接受。静态 `__all__` re-export 会与对应 import 一起作为
+原子编辑。复杂、多行、动态或通配导入会保守跳过。P5.2c 不启动任何文件/symbol 缩减，
+也不针对特定仓库目录或模块写规则。
+
 P1 会重复执行用户提供的命令，因此只适用于用户信任的本地代码与命令。它不承诺
 通用仓库隔离、最小化全局最优解或任意命令的安全执行。
 
@@ -80,8 +87,8 @@ P1 会重复执行用户提供的命令，因此只适用于用户信任的本�
 | P3 | 基于 AST 的 execution-verified symbol 缩减（已完成） |
 | P4 | Probe telemetry（已完成）；dependency-aware ordering 保持为实验性工作，不进入当前主线 |
 | P5.1 | 通用只读导入分析与候选报告（已完成） |
-| P5.2a/b | 目标 pytest 入口感知的只读候选分析（当前） |
-| P5.2c | 批量 import candidate 的 execution-verified 验证（后续） |
+| P5.2a/b | 目标 pytest 入口感知的只读候选分析（已完成） |
+| P5.2c | 有界批量 import candidate 的 execution-verified 验证（当前） |
 | P5.3 | Preprocessing-first 文件缩减流水线（后续） |
 | P6 | 有预算的 Fast Mode 与交付闭环（后续） |
 

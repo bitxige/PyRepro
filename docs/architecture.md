@@ -8,8 +8,8 @@ user-specified runtime failure. Its central principle is:
 > Static analysis guides reduction; execution validates it.
 
 P3 implements execution-verified file reduction followed by optional
-source-symbol reduction. P5.1 also provides a read-only static-analysis entry
-point; it is intentionally outside the execution-reduction path:
+source-symbol reduction. P5.2c adds a deliberately separate, execution-
+verified import-pruning operation before a later P5.3 composition stage:
 
 ```text
 Trusted local project + argv reproduction command
@@ -40,6 +40,17 @@ pyrepro analyze-imports <source> [--pytest-node FILE::[CLASS::]TEST]
                     |
                     v
  candidates and conservative skips; no Oracle and no source edits
+
+pyrepro prune-imports <source> --pytest-node FILE::[CLASS::]TEST -- <argv...>
+                    |
+                    v
+  Stable baseline + target-aware candidates in a disposable workspace
+                    |
+                    v
+ bounded ordinary batch -> strict Oracle -> accept or restore / split
+                    |
+                    v
+ separate risk-marked batch -> strict Oracle -> verified pruned project
 ```
 
 The source project is never modified. A deletion is accepted only when the
@@ -55,6 +66,8 @@ pyrepro/
 │   ├── failure.py             # failure signatures and outcome classification
 │   ├── workspace.py           # disposable copies and source-integrity checks
 │   ├── reducer.py             # greedy/grouped reduction and candidate exclusions
+│   ├── import_pruner.py        # bounded verified source-local import pruning
+│   ├── probe_report.py         # atomic opt-in JSONL probe telemetry
 │   └── symbol_reducer.py      # AST source spans and greedy symbol reduction
 ├── scanner/
 │   ├── repository_scanner.py  # retained static repository inventory
@@ -76,6 +89,9 @@ pyrepro reduce <source> [--expect TEXT] [--strategy greedy|ddmin]
     [--max-granularity file|symbol] [--output PATH] -- <argv...>
 
 pyrepro analyze-imports <source> [--pytest-node FILE::[CLASS::]TEST]
+
+pyrepro prune-imports <source> --pytest-node FILE::[CLASS::]TEST
+    [--max-import-probes N] [--probe-records PATH] -- <argv...>
 ```
 
 It warns that the command will be executed repeatedly and requires users to
@@ -90,7 +106,24 @@ the selected test, reachable same-module helpers/fixtures, decorators, and
 module-load context define preserved import bindings; unrelated tests in the
 same module do not. Static `__all__` candidates include a companion line for a
 later consistent edit. Candidates carrying `side_effect_risk` remain proposals
-only and require execution validation in a future P5.2c stage.
+only and require execution validation.
+
+`prune-imports` is the narrow P5.2c validation stage. It uses that explicit
+pytest node only for syntax-level target scope; its supplied argv remains the
+actual trusted reproduction command. The pruner establishes the existing
+three-run failure baseline in a disposable workspace, constructs only
+source-local edits for simple one-line imports, and tests candidate operations
+in bounded batches. A failed batch is restored completely before a bounded
+bisection attempt. A static `__all__` companion is updated in the same atomic
+operation as its matching re-export. Ordinary and `side_effect_risk` candidates
+are processed in separate batches. Static analysis only proposes edits: the
+existing failure oracle remains the sole acceptance authority.
+
+Complex or multiline import statements, inline comments, semicolon chaining,
+wildcard imports, dynamic imports, and dynamic or complex `__all__` constructs
+are skipped rather than broadly rewriting module source. This operation does
+not run file, grouped, or symbol reduction; P5.3 remains responsible for
+composing verified preprocessing with repository reduction.
 
 ### `reproducer.runner`
 
@@ -165,8 +198,9 @@ pytest function node and derives entry-scoped candidates. It treats wildcard
 imports, dynamic imports, unresolved modules, and complex `__all__`
 declarations as conservative skips; obvious import-time side effects are
 reported as risk metadata in target mode. It is not wired into the reducers in
-P5.2a/b; a later stage may use its deterministic facts to build candidates,
-while execution remains the authority that accepts or rejects every deletion.
+P5.2a/b. P5.2c consumes only those deterministic facts to construct narrow
+import-edit candidates, while execution remains the authority that accepts or
+rejects every edit.
 
 ## P3 trust boundary
 
