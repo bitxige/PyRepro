@@ -89,6 +89,8 @@ class ProbeRecord:
     Attributes:
         phase: Reduction phase that issued the probe.
         candidate_paths: Repository-relative paths describing the proposal.
+        candidate_descriptions: Optional binding-level details for composite
+            source-edit probes.
         outcome: Oracle result; it remains the sole acceptance authority.
         accepted: Whether the reducer accepted the proposal.
         duration_seconds: Elapsed command execution time, excluding workspace
@@ -113,6 +115,7 @@ class ProbeRecord:
     exception_message: str | None
     failure_signature: FailureSignature | None
     candidate_python_lines: int | None = None
+    candidate_descriptions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

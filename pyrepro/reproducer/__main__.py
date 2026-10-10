@@ -12,6 +12,10 @@ from pyrepro.reproducer.failure import (
     ReductionOutcome,
     classify_result,
 )
+from pyrepro.reproducer.import_pruner import (
+    BatchImportPruner,
+    format_import_pruning_summary,
+)
 from pyrepro.reproducer.probe_report import (
     validate_probe_report_path,
     write_probe_records,
@@ -57,6 +61,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "analyze-imports",
         help="inspect Python import-pruning candidates without execution",
     )
+    prune_parser = subparsers.add_parser(
+        "prune-imports",
+        help="execution-verify bounded batches of target-aware import edits",
+    )
     analyze_parser.add_argument("source", type=Path, help="local project root")
     analyze_parser.add_argument(
         "--pytest-node",
@@ -66,6 +74,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     reduce_parser.add_argument("source", type=Path, help="trusted local project root")
+    _configure_prune_parser(prune_parser)
     reduce_parser.add_argument(
         "--output",
         type=Path,
@@ -113,6 +122,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments and arguments[0] == "analyze-imports":
         return _analyze_imports(parser, arguments)
+    if "-h" in arguments or "--help" in arguments:
+        parser.parse_args(arguments)
     try:
         command_separator = arguments.index("--")
     except ValueError:
@@ -134,6 +145,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as error:
         parser.error(str(error))
 
+    if args.operation == "prune-imports":
+        return _prune_imports(
+            parser,
+            args,
+            source,
+            output,
+            probe_report,
+            command,
+        )
     print("Warning: PyRepro will repeatedly execute the supplied command.")
     print("Only run a project and command that you trust.")
     try:
@@ -190,6 +210,99 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{file_result.wall_clock_seconds + symbol_result.wall_clock_seconds:.3f}"
         )
     print(f"Reduced project: {destination}")
+    if probe_report is not None:
+        print(f"Probe records: {probe_report}")
+    return 0
+
+
+def _configure_prune_parser(parser: argparse.ArgumentParser) -> None:
+    """Add the intentionally narrow PR5.2c import-pruning CLI arguments."""
+    parser.add_argument("source", type=Path, help="trusted local project root")
+    parser.add_argument(
+        "--pytest-node",
+        required=True,
+        help="target test node as FILE::TEST or FILE::CLASS::TEST",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="new pruned-project directory (default: sibling .pyrepro-output/<name>)",
+    )
+    parser.add_argument(
+        "--timeout-seconds",
+        default=5.0,
+        type=float,
+        help="maximum duration for each command execution (default: 5)",
+    )
+    parser.add_argument(
+        "--expect",
+        help="text that must occur in the stable baseline failure signature",
+    )
+    parser.add_argument(
+        "--failure-match",
+        choices=tuple(mode.value for mode in FailureMatchMode),
+        default=FailureMatchMode.STRICT.value,
+        help="failure identity for pruning; strict is the product default",
+    )
+    parser.add_argument(
+        "--max-import-probes",
+        type=int,
+        default=16,
+        help="maximum bounded import-pruning probes (default: 16)",
+    )
+    parser.add_argument(
+        "--probe-records",
+        type=Path,
+        help="write optional import-pruning JSONL telemetry outside the source project",
+    )
+
+
+def _prune_imports(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    source: Path,
+    output: Path,
+    probe_report: Path | None,
+    command: Sequence[str],
+) -> int:
+    """Execute bounded target-aware import pruning in a disposable workspace."""
+    print("Warning: PyRepro will repeatedly execute the supplied command.")
+    print("Only run a project and command that you trust.")
+    try:
+        runner = CommandRunner(command, timeout_seconds=args.timeout_seconds)
+        match_mode = FailureMatchMode(args.failure_match)
+        pruner = BatchImportPruner(
+            runner,
+            args.pytest_node,
+            expected_text=args.expect,
+            match_mode=match_mode,
+            max_probes=args.max_import_probes,
+        )
+        with ReductionWorkspace(source) as workspace:
+            result = pruner.prune(workspace)
+            destination = workspace.copy_reduced_to(output)
+            output_result = runner.run(destination)
+            output_outcome = classify_result(
+                output_result,
+                result.baseline_signature,
+                destination,
+                match_mode,
+            )
+    except (OSError, UnstableBaselineError, ValueError) as error:
+        parser.error(str(error))
+
+    if output_outcome is not ReductionOutcome.SAME_FAILURE:
+        parser.error("copied pruned project did not reproduce the baseline failure")
+    if probe_report is not None:
+        try:
+            write_probe_records(probe_report, result)
+        except OSError as error:
+            parser.error(
+                "failed to write probe records; the verified pruned project "
+                f"remains at {destination}: {error}"
+            )
+    print(format_import_pruning_summary(result))
+    print(f"Pruned project: {destination}")
     if probe_report is not None:
         print(f"Probe records: {probe_report}")
     return 0

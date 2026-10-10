@@ -76,11 +76,12 @@ locates original source ranges, including decorators; the runtime failure oracle
 is still the only acceptance criterion.
 
 `--probe-records <path>` optionally writes one JSONL object for each
-file-reduction candidate probe. Each record includes the phase, proposed
-candidate paths, oracle outcome, acceptance decision, command duration,
-cumulative command time, proposed candidate Python LOC, return code, parsed
-exception details, and failure signature. The path must be new and outside the
-source project. This observability output does not alter reduction decisions.
+execution-verified candidate probe. Each record includes the phase, proposed
+candidate paths and optional binding-level details, oracle outcome, acceptance
+decision, command duration, cumulative command time, proposed candidate Python
+LOC, return code, parsed exception details, and failure signature. The path
+must be new and outside the source project. This observability output does not
+alter reduction decisions.
 
 The module entry point is equivalent:
 
@@ -122,6 +123,31 @@ associated static `__all__` line when a later verifier must update both
 structures together. A `side_effect_risk` label means the static analyzer found
 an import-time uncertainty; it is not approval to remove the import.
 
+## Execution-verified import pruning
+
+`prune-imports` converts target-aware import candidates into narrowly scoped,
+source-local edits in a disposable workspace. It first establishes the normal
+three-run strict failure baseline, then tries ordinary candidates in a batch.
+Rejected batches are restored and split only up to `--max-import-probes`.
+Candidates carrying `side_effect_risk` are tried separately after ordinary
+candidates; neither group is accepted without the same runtime failure.
+
+```bash
+pyrepro prune-imports ~/my_project \
+  --pytest-node tests/test_example.py::test_failure \
+  --max-import-probes 16 \
+  --probe-records /tmp/import-pruning.jsonl \
+  -- python run_target.py
+```
+
+This stage supports only simple one-line top-level `import` / `from ... import`
+statements without inline comments or semicolon chaining, and static one-line
+`__all__` lists or tuples. For a package re-export, the import binding and its
+corresponding `__all__` entry are one atomic proposal. Complex statements,
+dynamic imports, wildcard imports, and dynamic exports are skipped rather than
+rewritten. `prune-imports` does not run greedy, ddmin, or symbol reduction;
+P5.3 will compose verified preprocessing with those existing reducers.
+
 ## Included smoke fixtures
 
 - `examples/failing_project`: preserves `KeyError: 'width'` at
@@ -142,9 +168,8 @@ See [docs/architecture.md](docs/architecture.md) for the reduction and
 retained static-analysis foundations. The broader goals and staged roadmap are
 in [docs/project-overview.md](docs/project-overview.md).
 
-Planned work after P5.2a/b:
+Planned work after P5.2c:
 
-- P5.2c: execution-verified batch import pruning; and
 - P5.3/P6: preprocessing-first reduction, budgets, packaging, and reporting.
 
 ## Development

@@ -7,6 +7,13 @@ experiments remain available through Git history.
 
 ### Added
 
+- Added `pyrepro prune-imports` for bounded, execution-verified batches of
+  target-aware import and static `__all__` re-export edits. It works only in a
+  disposable workspace, restores rejected batches before bounded splitting,
+  keeps risk-marked candidates separate, and does not invoke file or symbol
+  reduction.
+- Extended optional JSONL probe telemetry with binding-level candidate details
+  so source-edit probes can be inspected alongside file-reduction probes.
 - Added target-aware, read-only `analyze-imports --pytest-node` analysis for
   explicit pytest function and method node IDs. It separates imports required
   by the target context from imports used only by unrelated tests, reports
