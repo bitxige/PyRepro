@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from pyrepro.reproducer import probe_report
 from pyrepro.reproducer.__main__ import main
 from pyrepro.reproducer.runner import CommandRunner
 from pyrepro.reproducer.workspace import tree_digest
@@ -161,6 +162,70 @@ def test_module_cli_rejects_probe_records_inside_source_project(tmp_path: Path, 
     assert not report.exists()
 
 
+def test_module_cli_rejects_an_existing_probe_report(tmp_path: Path, capsys):
+    """Do not overwrite a pre-existing telemetry artifact."""
+    report = tmp_path / "probes.jsonl"
+    report.write_text("previous telemetry\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "reduce",
+                str(FAILING_PROJECT),
+                "--output",
+                str(tmp_path / "output"),
+                "--probe-records",
+                str(report),
+                "--",
+                sys.executable,
+                "reproduce.py",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert error.value.code == 2
+    assert "probe report path already exists" in captured.err
+    assert report.read_text(encoding="utf-8") == "previous telemetry\n"
+
+
+def test_module_cli_cleans_failed_probe_report_and_preserves_output(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+):
+    """Report publication failures must not corrupt output or leak temp files."""
+    output = tmp_path / "output"
+    report = tmp_path / "probes.jsonl"
+
+    def fail_link(source: Path, target: Path) -> None:
+        del source, target
+        raise OSError("simulated publication failure")
+
+    monkeypatch.setattr(probe_report.os, "link", fail_link)
+
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "reduce",
+                str(FAILING_PROJECT),
+                "--output",
+                str(output),
+                "--probe-records",
+                str(report),
+                "--",
+                sys.executable,
+                "reproduce.py",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert error.value.code == 2
+    assert "failed to write probe records" in captured.err
+    assert str(output) in captured.err
+    assert "Traceback" not in captured.err
+    assert (output / "reproduce.py").is_file()
+    assert not report.exists()
+    assert not list(tmp_path.glob(".probes.jsonl.*.tmp"))
+
+
 def test_module_cli_reduces_a_trusted_local_training_project(tmp_path: Path, capsys):
     """Allow a non-P0 local project while preserving an expected failure."""
     output = tmp_path / "reduced-training-project"
@@ -271,6 +336,7 @@ def test_module_cli_rejects_a_blank_expected_failure(tmp_path: Path):
 def test_module_cli_runs_the_ddmin_strategy(tmp_path: Path, capsys):
     """Expose the P2 grouped reducer through the public CLI strategy option."""
     output = tmp_path / "ddmin-output"
+    report = tmp_path / "ddmin-probes.jsonl"
 
     status = main(
         [
@@ -278,6 +344,8 @@ def test_module_cli_runs_the_ddmin_strategy(tmp_path: Path, capsys):
             str(FAILING_PROJECT),
             "--output",
             str(output),
+            "--probe-records",
+            str(report),
             "--strategy",
             "ddmin",
             "--",
@@ -292,6 +360,15 @@ def test_module_cli_runs_the_ddmin_strategy(tmp_path: Path, capsys):
     assert "Strategy: ddmin" in captured.out
     assert "Oracle executions:" in captured.out
     assert (output / "reproduce.py").is_file()
+    records = [json.loads(line) for line in report.read_text().splitlines()]
+    assert records
+    assert {record["phase"] for record in records} <= {
+        "subset",
+        "complement",
+        "cleanup",
+        "minimality",
+    }
+    assert all(isinstance(record["remaining_python_loc"], int) for record in records)
 
 
 @pytest.mark.parametrize("strategy", ("greedy", "ddmin"))

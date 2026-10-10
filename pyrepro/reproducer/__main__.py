@@ -150,7 +150,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("copied reduced project did not reproduce the baseline failure")
 
     if probe_report is not None:
-        write_probe_records(probe_report, file_result)
+        try:
+            write_probe_records(probe_report, file_result)
+        except OSError as error:
+            parser.error(
+                "failed to write probe records; the verified reduced project "
+                f"remains at {destination}: {error}"
+            )
 
     print(format_reduction_summary(file_result))
     if symbol_result is not None:

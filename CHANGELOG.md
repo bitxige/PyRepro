@@ -9,7 +9,8 @@ experiments remain available through Git history.
 
 - Added optional `--probe-records` JSONL export for structured file-reduction
   telemetry, including per-probe outcome, timing, candidate LOC, and parsed
-  failure details without changing reduction decisions.
+  failure details without changing reduction decisions. Reports are atomically
+  published without overwriting an existing destination.
 - Added structured per-probe telemetry for file reduction, including command
   duration, exit status, parsed exception details, failure signatures, and a
   compact command-line breakdown of different failures and timeouts.

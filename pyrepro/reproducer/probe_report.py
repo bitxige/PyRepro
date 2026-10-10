@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from pyrepro.reproducer.reducer import ProbeRecord, ReductionResult
@@ -39,7 +41,7 @@ def validate_probe_report_path(path: Path, source_root: Path) -> Path:
 
 
 def write_probe_records(destination: Path, result: ReductionResult) -> None:
-    """Write one JSON object per file-reduction probe.
+    """Atomically create one JSON object per file-reduction probe.
 
     ``elapsed_seconds`` is the cumulative command-execution duration rather
     than reducer wall-clock time. This isolates Oracle cost from workspace I/O.
@@ -50,17 +52,40 @@ def write_probe_records(destination: Path, result: ReductionResult) -> None:
     Args:
         destination: Validated, non-existing JSONL output path.
         result: Completed file-reduction result containing probe records.
+
+    Raises:
+        OSError: If the report cannot be created. Existing destinations are
+            never overwritten, and a temporary file is removed on failure.
     """
     cumulative_duration = 0.0
-    with destination.open("x", encoding="utf-8") as stream:
-        for probe_id, record in enumerate(result.probe_records, start=1):
-            cumulative_duration += record.duration_seconds
-            json.dump(
-                _record_as_json(probe_id, record, cumulative_duration),
-                stream,
-                sort_keys=True,
-            )
-            stream.write("\n")
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary_path = Path(stream.name)
+            for probe_id, record in enumerate(result.probe_records, start=1):
+                cumulative_duration += record.duration_seconds
+                json.dump(
+                    _record_as_json(probe_id, record, cumulative_duration),
+                    stream,
+                    sort_keys=True,
+                )
+                stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+
+        # link() publishes a completed file without replacing an existing path.
+        os.link(temporary_path, destination)
+    except OSError:
+        _remove_temporary_file(temporary_path)
+        raise
+    _remove_temporary_file(temporary_path)
 
 
 def _record_as_json(
@@ -91,3 +116,13 @@ def _record_as_json(
             }
         ),
     }
+
+
+def _remove_temporary_file(path: Path | None) -> None:
+    """Best-effort cleanup for an unpublished or linked temporary report."""
+    if path is None:
+        return
+    try:
+        path.unlink()
+    except OSError:
+        pass
