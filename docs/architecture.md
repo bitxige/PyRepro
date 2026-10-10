@@ -33,7 +33,7 @@ Trusted local project + argv reproduction command
                     v
           Verified reduced project copy
 
-pyrepro analyze-imports <source>
+pyrepro analyze-imports <source> [--pytest-node FILE::[CLASS::]TEST]
                     |
                     v
   Repository discovery + syntax-only import analysis
@@ -75,7 +75,7 @@ The CLI accepts:
 pyrepro reduce <source> [--expect TEXT] [--strategy greedy|ddmin]
     [--max-granularity file|symbol] [--output PATH] -- <argv...>
 
-pyrepro analyze-imports <source>
+pyrepro analyze-imports <source> [--pytest-node FILE::[CLASS::]TEST]
 ```
 
 It warns that the command will be executed repeatedly and requires users to
@@ -85,6 +85,12 @@ result is written to a sibling `.pyrepro-output/<source-name>` directory.
 `analyze-imports` is deliberately separate from `reduce`: it accepts no
 reproduction command, never creates a reduction workspace, and only prints
 syntax-derived import-pruning proposals with their conservative skip reasons.
+When `--pytest-node` is supplied, it performs a target-scoped read-only pass:
+the selected test, reachable same-module helpers/fixtures, decorators, and
+module-load context define preserved import bindings; unrelated tests in the
+same module do not. Static `__all__` candidates include a companion line for a
+later consistent edit. Candidates carrying `side_effect_risk` remain proposals
+only and require execution validation in a future P5.2c stage.
 
 ### `reproducer.runner`
 
@@ -154,11 +160,13 @@ unparsable files skipped during discovery.
 `RepositoryScanner`, `AstAnalyzer`, `ImportAnalyzer`, and `path_utils` provide
 read-only structural facts. `ImportAnalyzer` discovers flat / `src` source
 roots, imports, conventional test modules, and package re-exports without
-executing code. It treats wildcard imports, dynamic imports, unresolved
-modules, and obvious import-time side effects as conservative skips. It is not
-wired into the reducers in P5.1; a later stage may use its deterministic facts
-to build candidates, while execution remains the authority that accepts or
-rejects every deletion.
+executing code. Its target-aware mode accepts only an explicit conventional
+pytest function node and derives entry-scoped candidates. It treats wildcard
+imports, dynamic imports, unresolved modules, and complex `__all__`
+declarations as conservative skips; obvious import-time side effects are
+reported as risk metadata in target mode. It is not wired into the reducers in
+P5.2a/b; a later stage may use its deterministic facts to build candidates,
+while execution remains the authority that accepts or rejects every deletion.
 
 ## P3 trust boundary
 

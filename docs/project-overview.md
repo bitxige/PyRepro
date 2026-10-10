@@ -33,7 +33,7 @@ PyRepro 是一个面向 Python 项目运行故障的自动复现缩减工具。�
 通过“删减后是否仍复现同一故障”的可执行判据进行搜索。完整决策记录见
 [`0007-pivot-to-failure-reduction.md`](decisions/0007-pivot-to-failure-reduction.md)。
 
-## 当前 P5.1
+## 当前 P5.2a/b
 
 P1 将 P0 的最小闭环扩展到开发者明确选择的可信本地项目：
 
@@ -61,6 +61,12 @@ P5.1 增加只读的通用静态导入分析：它识别 flat / `src` 布局、�
 保守跳过原因。该阶段不执行用户命令、不创建工作副本、不修改 source，也不将静态
 结果视为删除许可。
 
+P5.2a/b 在显式 pytest node ID 下将候选范围收窄到目标测试函数：它保留目标函数、
+可静态发现的同模块 helper / fixture、decorator 与模块加载上下文所使用的 import，
+而不让同一模块中其他测试函数的引用永久锁住候选。静态 ``__all__`` re-export 候选
+携带需要同步更新的行号；明显 import-time side effect 的候选携带风险标记，仍必须
+由后续 Oracle 验证。该阶段同样不执行命令或修改源码。
+
 P1 会重复执行用户提供的命令，因此只适用于用户信任的本地代码与命令。它不承诺
 通用仓库隔离、最小化全局最优解或任意命令的安全执行。
 
@@ -73,8 +79,9 @@ P1 会重复执行用户提供的命令，因此只适用于用户信任的本�
 | P2 | 分组与 ddmin-inspired 文件缩减、oracle execution 指标与专用 benchmark（已完成） |
 | P3 | 基于 AST 的 execution-verified symbol 缩减（已完成） |
 | P4 | Probe telemetry（已完成）；dependency-aware ordering 保持为实验性工作，不进入当前主线 |
-| P5.1 | 通用只读导入分析与候选报告（当前） |
-| P5.2 | 批量 import candidate 的 execution-verified 验证（后续） |
+| P5.1 | 通用只读导入分析与候选报告（已完成） |
+| P5.2a/b | 目标 pytest 入口感知的只读候选分析（当前） |
+| P5.2c | 批量 import candidate 的 execution-verified 验证（后续） |
 | P5.3 | Preprocessing-first 文件缩减流水线（后续） |
 | P6 | 有预算的 Fast Mode 与交付闭环（后续） |
 

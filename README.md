@@ -108,6 +108,20 @@ modules, and obvious import-time side effects. A listed candidate is not proof
 that deletion is safe; a later reduction phase must validate any edit with the
 failure oracle.
 
+For a conventional pytest failure, scope analysis to the exact target test so
+imports used solely by unrelated tests in the same file can become candidates:
+
+```bash
+pyrepro analyze-imports ~/my_project \
+  --pytest-node tests/test_example.py::test_failure
+```
+
+Class-method nodes use `FILE::CLASS::TEST`. This remains a read-only command:
+it neither executes pytest nor changes source. Re-export candidates show an
+associated static `__all__` line when a later verifier must update both
+structures together. A `side_effect_risk` label means the static analyzer found
+an import-time uncertainty; it is not approval to remove the import.
+
 ## Included smoke fixtures
 
 - `examples/failing_project`: preserves `KeyError: 'width'` at
@@ -128,9 +142,9 @@ See [docs/architecture.md](docs/architecture.md) for the reduction and
 retained static-analysis foundations. The broader goals and staged roadmap are
 in [docs/project-overview.md](docs/project-overview.md).
 
-Planned work after P5.1:
+Planned work after P5.2a/b:
 
-- P5.2: execution-verified batch import pruning; and
+- P5.2c: execution-verified batch import pruning; and
 - P5.3/P6: preprocessing-first reduction, budgets, packaging, and reporting.
 
 ## Development
