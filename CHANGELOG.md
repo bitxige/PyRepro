@@ -7,6 +7,11 @@ experiments remain available through Git history.
 
 ### Added
 
+- Added target-aware, read-only `analyze-imports --pytest-node` analysis for
+  explicit pytest function and method node IDs. It separates imports required
+  by the target context from imports used only by unrelated tests, reports
+  static `__all__` companion lines for consistent later re-export edits, and
+  labels import-time side-effect uncertainty without accepting any source edit.
 - Added `pyrepro analyze-imports`, a read-only generic analysis command for
   flat and `src` layouts that reports potential unused test imports and package
   re-exports with conservative skip reasons. It does not execute a command or

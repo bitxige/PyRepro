@@ -6,8 +6,11 @@ from .import_analyzer import (
     ImportAnalyzer,
     ImportCandidate,
     ImportSkip,
+    PytestEntry,
     RepositoryLayout,
+    TargetImportAnalysis,
     format_import_analysis,
+    format_target_import_analysis,
 )
 from .repository_scanner import RepositoryProfile, RepositoryScanner
 
@@ -17,8 +20,11 @@ __all__ = [
     "ImportAnalyzer",
     "ImportCandidate",
     "ImportSkip",
+    "PytestEntry",
     "RepositoryLayout",
     "RepositoryProfile",
     "RepositoryScanner",
+    "TargetImportAnalysis",
     "format_import_analysis",
+    "format_target_import_analysis",
 ]

@@ -28,7 +28,11 @@ from pyrepro.reproducer.symbol_reducer import (
     format_symbol_reduction_summary,
 )
 from pyrepro.reproducer.workspace import ReductionWorkspace
-from pyrepro.scanner.import_analyzer import ImportAnalyzer, format_import_analysis
+from pyrepro.scanner.import_analyzer import (
+    ImportAnalyzer,
+    format_import_analysis,
+    format_target_import_analysis,
+)
 
 _DEFAULT_OUTPUT_DIRECTORY_NAME = ".pyrepro-output"
 
@@ -54,6 +58,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="inspect Python import-pruning candidates without execution",
     )
     analyze_parser.add_argument("source", type=Path, help="local project root")
+    analyze_parser.add_argument(
+        "--pytest-node",
+        help=(
+            "scope candidates to FILE::TEST or FILE::CLASS::TEST without "
+            "executing the test"
+        ),
+    )
     reduce_parser.add_argument("source", type=Path, help="trusted local project root")
     reduce_parser.add_argument(
         "--output",
@@ -191,10 +202,20 @@ def _analyze_imports(parser: argparse.ArgumentParser, arguments: Sequence[str]) 
     if not source.is_dir():
         parser.error(f"source root is not a directory: {source}")
     try:
-        analysis = ImportAnalyzer(source).analyze()
+        analyzer = ImportAnalyzer(source)
+        analysis = (
+            analyzer.analyze()
+            if args.pytest_node is None
+            else analyzer.analyze_pytest_node(args.pytest_node)
+        )
     except (OSError, ValueError) as error:
         parser.error(str(error))
-    print(format_import_analysis(analysis))
+    formatter = (
+        format_import_analysis
+        if args.pytest_node is None
+        else format_target_import_analysis
+    )
+    print(formatter(analysis))
     return 0
 
 

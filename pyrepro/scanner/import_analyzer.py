@@ -43,6 +43,12 @@ class ImportCandidate:
         imported_module: Resolved module targeted by the import statement.
         imported_name: Name requested from ``imported_module``, if applicable.
         reason: Explanation of why static analysis proposed this binding.
+        all_line: Line of a static ``__all__`` declaration that must be kept in
+            sync if this re-export is later pruned. ``None`` means that no
+            accompanying ``__all__`` edit is required.
+        risk_reason: Optional static risk that a later batch verifier must
+            report and prioritize conservatively. It never authorizes a source
+            edit without execution validation.
     """
 
     kind: str
@@ -52,6 +58,8 @@ class ImportCandidate:
     imported_module: str
     imported_name: str | None
     reason: str
+    all_line: int | None = None
+    risk_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -114,6 +122,66 @@ class ImportAnalysis:
         )
 
 
+@dataclass(frozen=True)
+class PytestEntry:
+    """One statically resolved pytest test-function entry point.
+
+    Attributes:
+        node_id: Original pytest node ID supplied by the user.
+        path: Repository-relative test module path.
+        class_name: Containing test class for a method node, if supplied.
+        function_name: Target test function or method name.
+    """
+
+    node_id: str
+    path: str
+    class_name: str | None
+    function_name: str
+
+
+@dataclass(frozen=True)
+class TargetImportAnalysis:
+    """Read-only import candidates scoped to one statically resolved test.
+
+    This result is intentionally a candidate report, not a proof that a source
+    edit preserves the target failure. A later execution-verified stage must
+    validate every proposed edit in a disposable workspace.
+
+    Attributes:
+        base: Repository-level P5.1 analysis facts.
+        entry: Resolved target pytest entry.
+        retained_bindings: Top-level test-module bindings used by the target,
+            statically reachable local helpers or fixtures, decorators, or
+            module-level execution context.
+        candidates: Target-scoped import and re-export proposals.
+        skips: Conservative omissions with stable reason codes.
+    """
+
+    base: ImportAnalysis
+    entry: PytestEntry
+    retained_bindings: tuple[str, ...]
+    candidates: tuple[ImportCandidate, ...]
+    skips: tuple[ImportSkip, ...]
+
+    @property
+    def test_import_candidates(self) -> tuple[ImportCandidate, ...]:
+        """Return target-scoped test-module import candidates."""
+        return tuple(
+            candidate
+            for candidate in self.candidates
+            if candidate.kind == "target_test_import"
+        )
+
+    @property
+    def reexport_candidates(self) -> tuple[ImportCandidate, ...]:
+        """Return target-scoped package re-export candidates."""
+        return tuple(
+            candidate
+            for candidate in self.candidates
+            if candidate.kind == "target_reexport"
+        )
+
+
 class ImportAnalyzer:
     """Analyze Python imports without importing, executing, or editing source.
 
@@ -140,18 +208,7 @@ class ImportAnalyzer:
             A syntax-only analysis result. This method never executes project
             code, invokes an Oracle, or modifies the repository.
         """
-        profile = RepositoryScanner(self.root).scan()
-        layout = _discover_layout(profile)
-        index = _ModuleIndex(profile.python_paths, layout.source_roots)
-        facts: dict[str, _ModuleFacts] = {}
-        skips: list[ImportSkip] = []
-        for path in profile.python_paths:
-            module_name = index.module_for_path(path)
-            fact, parse_skip = _read_module_facts(self.root, path, module_name)
-            if parse_skip is not None:
-                skips.append(parse_skip)
-            elif fact is not None:
-                facts[path] = fact
+        profile, layout, index, facts, skips = self._collect_facts()
 
         used_reexports, wildcard_reexports, dynamic_reexports = _reexport_uses(
             facts.values(), index
@@ -180,6 +237,162 @@ class ImportAnalyzer:
                 unresolved,
             )
 
+        return ImportAnalysis(
+            root=self.root,
+            profile=profile,
+            layout=layout,
+            candidates=tuple(_sorted_candidates(candidates)),
+            skips=tuple(_sorted_skips(skips)),
+            unresolved_imports=tuple(sorted(unresolved)),
+            unparsable_files=tuple(
+                sorted(skip.path for skip in skips if skip.reason == "unparsable")
+            ),
+        )
+
+    def analyze_pytest_node(self, node_id: str) -> TargetImportAnalysis:
+        """Propose read-only import candidates for one pytest function node.
+
+        Only conventional function or method node IDs of the form
+        ``path/to/test_file.py::test_name`` or
+        ``path/to/test_file.py::TestClass::test_name`` are supported. Custom
+        pytest collectors and arbitrary reproduction commands are deliberately
+        not inferred. The result does not execute project code or edit source.
+
+        Args:
+            node_id: Explicit pytest node ID naming the target test function.
+
+        Returns:
+            Syntax-derived candidates scoped to the target entry and its
+            statically reachable same-module helper and fixture functions.
+
+        Raises:
+            ValueError: If the node ID does not name a resolvable Python test
+                function or method within this repository.
+        """
+        profile, layout, index, facts, parse_skips = self._collect_facts()
+        base = self._analysis_from_facts(profile, layout, index, facts, parse_skips)
+        entry = _parse_pytest_entry(node_id, profile)
+        tree = _read_syntax_tree(self.root, entry.path)
+        context = _target_context(tree, entry)
+        target_fact = facts.get(entry.path)
+        if target_fact is None:
+            raise ValueError(f"target test module could not be parsed: {entry.path}")
+
+        candidates: list[ImportCandidate] = []
+        skips: list[ImportSkip] = []
+        unresolved: set[str] = set()
+        for binding in target_fact.imports:
+            if not binding.is_top_level:
+                continue
+            _consider_binding(
+                "target_test_import",
+                target_fact,
+                binding,
+                index,
+                facts,
+                candidates,
+                skips,
+                unresolved,
+                used_names=context.required_names,
+                candidate_reason="unused_for_target_entry",
+                used_skip_reason="target_entry_used",
+                used_skip_detail=(
+                    "binding is used by the target entry, a statically reachable "
+                    "local helper or fixture, decorator, or module-level context"
+                ),
+                allow_side_effect_risk=True,
+            )
+
+        required_reexports, relevant_packages = _target_import_surface(
+            target_fact, context, index
+        )
+        for fact in facts.values():
+            _discover_target_reexport_candidates(
+                fact,
+                relevant_packages,
+                required_reexports,
+                index,
+                facts,
+                candidates,
+                skips,
+                unresolved,
+            )
+        return TargetImportAnalysis(
+            base=base,
+            entry=entry,
+            retained_bindings=tuple(
+                sorted(
+                    binding.bound_name
+                    for binding in target_fact.imports
+                    if binding.is_top_level
+                    and binding.bound_name is not None
+                    and binding.bound_name in context.required_names
+                )
+            ),
+            candidates=tuple(_sorted_candidates(candidates)),
+            skips=tuple(_sorted_skips(skips)),
+        )
+
+    def _collect_facts(
+        self,
+    ) -> tuple[
+        RepositoryProfile,
+        RepositoryLayout,
+        _ModuleIndex,
+        dict[str, _ModuleFacts],
+        list[ImportSkip],
+    ]:
+        """Scan one repository and parse its Python files without execution."""
+        profile = RepositoryScanner(self.root).scan()
+        layout = _discover_layout(profile)
+        index = _ModuleIndex(profile.python_paths, layout.source_roots)
+        facts: dict[str, _ModuleFacts] = {}
+        skips: list[ImportSkip] = []
+        for path in profile.python_paths:
+            module_name = index.module_for_path(path)
+            fact, parse_skip = _read_module_facts(self.root, path, module_name)
+            if parse_skip is not None:
+                skips.append(parse_skip)
+            elif fact is not None:
+                facts[path] = fact
+        return profile, layout, index, facts, skips
+
+    def _analysis_from_facts(
+        self,
+        profile: RepositoryProfile,
+        layout: RepositoryLayout,
+        index: _ModuleIndex,
+        facts: dict[str, _ModuleFacts],
+        skips: list[ImportSkip],
+    ) -> ImportAnalysis:
+        """Build the unchanged P5.1 repository result from parsed facts."""
+        skips = list(skips)
+        used_reexports, wildcard_reexports, dynamic_reexports = _reexport_uses(
+            facts.values(), index
+        )
+        candidates: list[ImportCandidate] = []
+        unresolved: set[str] = set()
+        for fact in facts.values():
+            _discover_test_candidates(
+                fact,
+                layout,
+                index,
+                facts,
+                candidates,
+                skips,
+                unresolved,
+            )
+            _discover_reexport_candidates(
+                fact,
+                index,
+                facts,
+                used_reexports,
+                wildcard_reexports,
+                dynamic_reexports,
+                candidates,
+                skips,
+                unresolved,
+            )
         return ImportAnalysis(
             root=self.root,
             profile=profile,
@@ -243,6 +456,71 @@ def format_import_analysis(analysis: ImportAnalysis) -> str:
     return "\n".join(lines)
 
 
+def format_target_import_analysis(analysis: TargetImportAnalysis) -> str:
+    """Format a target-scoped, read-only import-candidate report.
+
+    Args:
+        analysis: Static candidates for one explicitly named pytest test.
+
+    Returns:
+        Multi-line report describing retained bindings, candidates, and
+        conservative skips. It always states that no Oracle was run.
+    """
+    lines = [
+        "Target import analysis",
+        "----------------------",
+        f"Target pytest node: {analysis.entry.node_id}",
+        f"Repository layout: {analysis.base.layout.kind}",
+        "Retained target bindings: "
+        + (", ".join(analysis.retained_bindings) or "none"),
+        f"Candidate target imports: {len(analysis.test_import_candidates)}",
+        f"Candidate target re-exports: {len(analysis.reexport_candidates)}",
+        f"Conservative skips: {len(analysis.skips)}",
+        "",
+        "Candidates",
+        "----------",
+    ]
+    if analysis.candidates:
+        lines.extend(
+            "- "
+            f"{candidate.kind} {candidate.path}:{candidate.line} "
+            f"{candidate.bound_name} from {candidate.imported_module} "
+            f"({candidate.reason}"
+            + (
+                f"; update __all__ at line {candidate.all_line}"
+                if candidate.all_line is not None
+                else ""
+            )
+            + (
+                f"; risk: {candidate.risk_reason}"
+                if candidate.risk_reason is not None
+                else ""
+            )
+            + ")"
+            for candidate in analysis.candidates
+        )
+    else:
+        lines.append("none")
+    lines.extend(["", "Conservative skips", "------------------"])
+    if analysis.skips:
+        lines.extend(
+            "- "
+            f"{skip.path}:{skip.line if skip.line is not None else '-'} "
+            f"{skip.bound_name or '-'} ({skip.reason}: {skip.detail})"
+            for skip in analysis.skips
+        )
+    else:
+        lines.append("none")
+    lines.extend(
+        [
+            "",
+            "No files modified.",
+            "No Oracle executions.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 @dataclass(frozen=True)
 class _ImportBinding:
     path: str
@@ -267,6 +545,7 @@ class _ModuleFacts:
     dynamic_attribute_access: frozenset[str]
     exported_names: frozenset[str]
     dynamic_all: bool
+    static_all_lines: tuple[int, ...]
     top_level_side_effect_risk: bool
 
 
@@ -332,6 +611,13 @@ class _ModuleIndex:
                 imported_module = self.binding_module(binding)
                 if binding.is_star or imported_module is None:
                     return False
+                if self.path_for_module(imported_module) is None:
+                    # An external dependency can have arbitrary runtime
+                    # behavior, but it is not evidence that this repository
+                    # module itself has an *obvious* import-time side effect.
+                    # Later execution validation remains mandatory for every
+                    # candidate proposed through this module.
+                    continue
                 if not self._module_is_side_effect_free(
                     imported_module, facts, visiting
                 ):
@@ -362,6 +648,7 @@ _UNKNOWN_FACTS = _ModuleFacts(
     dynamic_attribute_access=frozenset(),
     exported_names=frozenset(),
     dynamic_all=False,
+    static_all_lines=(),
     top_level_side_effect_risk=True,
 )
 
@@ -428,6 +715,7 @@ class _FactCollector(ast.NodeVisitor):
         self.dynamic_attribute_access: set[str] = set()
         self.exported_names: set[str] = set()
         self.dynamic_all = False
+        self.static_all_lines: list[int] = []
         self.top_level_side_effect_risk = False
 
     def build(self) -> _ModuleFacts:
@@ -442,6 +730,7 @@ class _FactCollector(ast.NodeVisitor):
             dynamic_attribute_access=frozenset(self.dynamic_attribute_access),
             exported_names=frozenset(self.exported_names),
             dynamic_all=self.dynamic_all,
+            static_all_lines=tuple(self.static_all_lines),
             top_level_side_effect_risk=self.top_level_side_effect_risk,
         )
 
@@ -459,6 +748,7 @@ class _FactCollector(ast.NodeVisitor):
                 self.dynamic_all = True
             else:
                 self.exported_names.update(names)
+                self.static_all_lines.append(node.lineno)
             return
         if _is_safe_top_level_statement(node):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
@@ -616,6 +906,225 @@ def _is_dynamic_import_call(node: ast.Call) -> bool:
     )
 
 
+@dataclass(frozen=True)
+class _TargetContext:
+    """Static names and attributes required to execute one test entry."""
+
+    required_names: frozenset[str]
+    attribute_uses: frozenset[tuple[str, str]]
+
+
+def _parse_pytest_entry(node_id: str, profile: RepositoryProfile) -> PytestEntry:
+    """Parse a conventional function or method pytest node ID.
+
+    Parameterized node suffixes are accepted because they select the same
+    function body for static import analysis.
+    """
+    parts = node_id.split("::")
+    if len(parts) not in {2, 3} or not all(parts):
+        raise ValueError(
+            f"pytest node must be FILE::TEST or FILE::CLASS::TEST: {node_id}"
+        )
+    raw_path = Path(parts[0])
+    if raw_path.is_absolute() or ".." in raw_path.parts:
+        raise ValueError(f"pytest node path must be repository-relative: {parts[0]}")
+    path = raw_path.as_posix()
+    if path not in profile.python_paths:
+        raise ValueError(f"pytest node does not name a repository Python file: {path}")
+    function_name = parts[-1].split("[", maxsplit=1)[0]
+    class_name = parts[1] if len(parts) == 3 else None
+    return PytestEntry(
+        node_id=node_id,
+        path=path,
+        class_name=class_name,
+        function_name=function_name,
+    )
+
+
+def _read_syntax_tree(root: Path, path: str) -> ast.Module:
+    """Read one known Python source file as AST without importing it."""
+    try:
+        with tokenize.open(root / path) as source_file:
+            return ast.parse(source_file.read(), filename=path)
+    except (OSError, SyntaxError, UnicodeDecodeError) as error:
+        raise ValueError(
+            f"target test module could not be parsed: {path}: {error}"
+        ) from error
+
+
+def _target_context(tree: ast.Module, entry: PytestEntry) -> _TargetContext:
+    """Return names needed by a test, local helpers, fixtures, and context."""
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    target = _find_target_function(tree, entry)
+    selected: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {
+        entry.function_name: target
+    }
+    pending = [target]
+    required_names = _module_context_names(tree)
+    attribute_uses = _module_context_attributes(tree)
+    while pending:
+        function = pending.pop()
+        names, attributes = _node_references(function)
+        required_names.update(names)
+        attribute_uses.update(attributes)
+        for name in names | _parameter_names(function):
+            helper = functions.get(name)
+            if helper is not None and name not in selected:
+                selected[name] = helper
+                pending.append(helper)
+
+    target_class = _find_target_class(tree, entry.class_name)
+    if target_class is not None:
+        names, attributes = _class_definition_references(target_class)
+        required_names.update(names)
+        attribute_uses.update(attributes)
+    return _TargetContext(
+        required_names=frozenset(required_names),
+        attribute_uses=frozenset(attribute_uses),
+    )
+
+
+def _find_target_function(
+    tree: ast.Module, entry: PytestEntry
+) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    """Resolve the target function or direct class method named by one entry."""
+    if entry.class_name is None:
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                if node.name == entry.function_name:
+                    return node
+        raise ValueError(f"pytest target function was not found: {entry.node_id}")
+    target_class = _find_target_class(tree, entry.class_name)
+    if target_class is None:
+        raise ValueError(f"pytest target class was not found: {entry.node_id}")
+    for node in target_class.body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            if node.name == entry.function_name:
+                return node
+    raise ValueError(f"pytest target method was not found: {entry.node_id}")
+
+
+def _find_target_class(tree: ast.Module, name: str | None) -> ast.ClassDef | None:
+    """Return one direct test class, when the node ID names a class method."""
+    if name is None:
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == name:
+            return node
+    return None
+
+
+def _module_context_names(tree: ast.Module) -> set[str]:
+    """Collect names needed while Python creates the target test module."""
+    names: set[str] = set()
+    for statement in tree.body:
+        if isinstance(statement, ast.Import | ast.ImportFrom):
+            continue
+        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        node_names, _ = _node_references(statement)
+        names.update(node_names)
+    return names
+
+
+def _module_context_attributes(tree: ast.Module) -> set[tuple[str, str]]:
+    """Collect module-level attribute accesses evaluated at import time."""
+    attributes: set[tuple[str, str]] = set()
+    for statement in tree.body:
+        if isinstance(statement, ast.Import | ast.ImportFrom):
+            continue
+        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        _, node_attributes = _node_references(statement)
+        attributes.update(node_attributes)
+    return attributes
+
+
+def _class_definition_references(
+    node: ast.ClassDef,
+) -> tuple[set[str], set[tuple[str, str]]]:
+    """Collect class-definition expressions without walking unrelated methods."""
+    references: list[ast.AST] = [*node.decorator_list, *node.bases]
+    references.extend(keyword.value for keyword in node.keywords)
+    references.extend(
+        child
+        for child in node.body
+        if not isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
+    )
+    names: set[str] = set()
+    attributes: set[tuple[str, str]] = set()
+    for reference in references:
+        found_names, found_attributes = _node_references(reference)
+        names.update(found_names)
+        attributes.update(found_attributes)
+    return names, attributes
+
+
+def _node_references(node: ast.AST) -> tuple[set[str], set[tuple[str, str]]]:
+    """Return loaded bare names and one-level attributes below an AST node."""
+    names = {
+        child.id
+        for child in ast.walk(node)
+        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load)
+    }
+    attributes = {
+        (child.value.id, child.attr)
+        for child in ast.walk(node)
+        if isinstance(child, ast.Attribute)
+        and isinstance(child.ctx, ast.Load)
+        and isinstance(child.value, ast.Name)
+    }
+    return names, attributes
+
+
+def _parameter_names(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    """Return names that may resolve to same-module pytest fixtures."""
+    arguments = node.args
+    return {
+        argument.arg
+        for argument in [
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+        ]
+    }
+
+
+def _target_import_surface(
+    fact: _ModuleFacts,
+    context: _TargetContext,
+    index: _ModuleIndex,
+) -> tuple[set[tuple[str, str]], set[str]]:
+    """Return target-required re-exports and packages loaded by target imports."""
+    required_reexports: set[tuple[str, str]] = set()
+    relevant_packages: set[str] = set()
+    for binding in fact.imports:
+        if not binding.is_top_level or binding.bound_name not in context.required_names:
+            continue
+        module = index.binding_module(binding)
+        if module is None:
+            continue
+        parts = module.split(".")
+        relevant_packages.update(
+            ".".join(parts[:length]) for length in range(1, len(parts) + 1)
+        )
+        if binding.imported_name is not None:
+            required_reexports.add(
+                (binding.imported_module or module, binding.imported_name)
+            )
+        else:
+            required_reexports.update(
+                (binding.imported_module or module, attribute)
+                for base, attribute in context.attribute_uses
+                if base == binding.bound_name
+            )
+    return required_reexports, relevant_packages
+
+
 def _reexport_uses(
     facts: Iterable[_ModuleFacts], index: _ModuleIndex
 ) -> tuple[set[tuple[str, str]], set[str], set[str]]:
@@ -718,6 +1227,74 @@ def _discover_reexport_candidates(
         )
 
 
+def _discover_target_reexport_candidates(
+    fact: _ModuleFacts,
+    relevant_packages: set[str],
+    required_reexports: set[tuple[str, str]],
+    index: _ModuleIndex,
+    facts: dict[str, _ModuleFacts],
+    candidates: list[ImportCandidate],
+    skips: list[ImportSkip],
+    unresolved: set[str],
+) -> None:
+    """Propose static ``__all__`` re-exports not needed by one target entry."""
+    if (
+        not fact.is_initializer
+        or fact.module_name is None
+        or fact.module_name not in relevant_packages
+    ):
+        return
+    if fact.dynamic_all:
+        for binding in fact.imports:
+            if binding.is_top_level:
+                _skip(binding, skips, "dynamic_all", "package __all__ is not static")
+        return
+    for binding in fact.imports:
+        if not binding.is_top_level:
+            continue
+        if binding.bound_name is None:
+            _skip(binding, skips, "unbound_import", "import does not bind one name")
+            continue
+        if binding.bound_name not in fact.exported_names:
+            _skip(
+                binding,
+                skips,
+                "not_static_reexport",
+                "binding is not included in static package __all__",
+            )
+            continue
+        if (fact.module_name, binding.bound_name) in required_reexports:
+            _skip(
+                binding,
+                skips,
+                "target_entry_used",
+                "re-export is required by the target entry's import surface",
+            )
+            continue
+        if len(fact.static_all_lines) != 1:
+            _skip(
+                binding,
+                skips,
+                "complex_all",
+                "package has multiple static __all__ assignments",
+            )
+            continue
+        _consider_binding(
+            "target_reexport",
+            fact,
+            binding,
+            index,
+            facts,
+            candidates,
+            skips,
+            unresolved,
+            used_names=frozenset(),
+            candidate_reason="unused_for_target_entry",
+            all_line=fact.static_all_lines[0],
+            allow_side_effect_risk=True,
+        )
+
+
 def _consider_binding(
     kind: str,
     fact: _ModuleFacts,
@@ -727,6 +1304,13 @@ def _consider_binding(
     candidates: list[ImportCandidate],
     skips: list[ImportSkip],
     unresolved: set[str],
+    *,
+    used_names: frozenset[str] | None = None,
+    candidate_reason: str = "unused_top_level_binding",
+    used_skip_reason: str = "binding_used",
+    used_skip_detail: str = "bound name has a static load",
+    all_line: int | None = None,
+    allow_side_effect_risk: bool = False,
 ) -> None:
     if binding.is_star:
         _skip(binding, skips, "wildcard_import", "star imports are not prunable")
@@ -737,8 +1321,9 @@ def _consider_binding(
     if fact.dynamic_import:
         _skip(binding, skips, "dynamic_import", "module contains a dynamic import")
         return
-    if binding.bound_name in fact.loaded_names:
-        _skip(binding, skips, "binding_used", "bound name has a static load")
+    effective_used_names = fact.loaded_names if used_names is None else used_names
+    if binding.bound_name in effective_used_names:
+        _skip(binding, skips, used_skip_reason, used_skip_detail)
         return
     module = index.binding_module(binding)
     if module is None:
@@ -752,9 +1337,12 @@ def _consider_binding(
         else:
             _skip(binding, skips, "external_import", module)
         return
+    risk_reason = None
     if not index.side_effect_free(module, facts):
-        _skip(binding, skips, "side_effect_risk", module)
-        return
+        if not allow_side_effect_risk:
+            _skip(binding, skips, "side_effect_risk", module)
+            return
+        risk_reason = "side_effect_risk"
     candidates.append(
         ImportCandidate(
             kind=kind,
@@ -763,7 +1351,9 @@ def _consider_binding(
             bound_name=binding.bound_name,
             imported_module=module,
             imported_name=binding.imported_name,
-            reason="unused_top_level_binding",
+            reason=candidate_reason,
+            all_line=all_line,
+            risk_reason=risk_reason,
         )
     )
 

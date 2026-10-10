@@ -175,6 +175,27 @@ def test_import_analyzer_traces_import_time_side_effect_dependencies(tmp_path: P
     assert _skip_reasons(analysis, "Wrapper") == {"side_effect_risk"}
 
 
+def test_import_analyzer_does_not_treat_external_imports_as_internal_side_effects(
+    tmp_path: Path,
+):
+    """Keep external dependencies separate from obvious local side effects."""
+    _write(tmp_path, "pkg/__init__.py", "")
+    _write(
+        tmp_path,
+        "pkg/wrapper.py",
+        "import json\n\nclass Wrapper:\n    pass\n",
+    )
+    _write(
+        tmp_path,
+        "tests/test_wrapper.py",
+        "from pkg.wrapper import Wrapper\n",
+    )
+
+    analysis = ImportAnalyzer(tmp_path).analyze()
+
+    assert _candidate_names(analysis) == {("test_import", "Wrapper")}
+
+
 def test_import_analyzer_skips_public_and_unresolved_package_imports(
     tmp_path: Path,
 ):
@@ -245,6 +266,175 @@ def test_import_analysis_format_explains_candidates_and_skips(tmp_path: Path):
     assert "Candidates" in report
     assert "Conservative skips" in report
     assert "No files modified." in report
+
+
+def test_target_analysis_ignores_imports_used_only_by_other_tests(tmp_path: Path):
+    """Scope test-import candidates to the requested pytest function."""
+    _write(tmp_path, "pkg/__init__.py", "")
+    _write(
+        tmp_path,
+        "pkg/items.py",
+        "class Needed:\n    pass\n\nclass Other:\n    pass\n",
+    )
+    _write(
+        tmp_path,
+        "tests/test_items.py",
+        "from pkg.items import Needed, Other\n\n"
+        "def test_target():\n"
+        "    assert Needed is not None\n\n"
+        "def test_other():\n"
+        "    assert Other is not None\n",
+    )
+    source_digest = tree_digest(tmp_path)
+
+    analysis = ImportAnalyzer(tmp_path).analyze_pytest_node(
+        "tests/test_items.py::test_target"
+    )
+
+    assert _candidate_names(analysis) == {("target_test_import", "Other")}
+    assert _skip_reasons(analysis, "Needed") == {"target_entry_used"}
+    assert tree_digest(tmp_path) == source_digest
+
+
+def test_target_analysis_keeps_same_module_fixture_and_module_context(tmp_path: Path):
+    """Keep imports reached through a target fixture, decorator, or pytestmark."""
+    _write(tmp_path, "pkg/__init__.py", "")
+    _write(
+        tmp_path,
+        "pkg/items.py",
+        "class Needed:\n    pass\n\nclass Other:\n    pass\n",
+    )
+    _write(
+        tmp_path,
+        "tests/test_items.py",
+        "import pytest\n"
+        "from pkg.items import Needed, Other\n\n"
+        "pytestmark = pytest.mark.usefixtures('shared')\n\n"
+        "@pytest.fixture\n"
+        "def payload():\n"
+        "    return Needed()\n\n"
+        "def test_target(payload):\n"
+        "    assert payload is not None\n\n"
+        "def test_other():\n"
+        "    assert Other is not None\n",
+    )
+
+    analysis = ImportAnalyzer(tmp_path).analyze_pytest_node(
+        "tests/test_items.py::test_target"
+    )
+
+    assert _candidate_names(analysis) == {("target_test_import", "Other")}
+    assert _skip_reasons(analysis, "Needed") == {"target_entry_used"}
+    assert _skip_reasons(analysis, "pytest") == {"target_entry_used"}
+
+
+def test_target_analysis_reports_unused_import_side_effect_risk_as_candidate(
+    tmp_path: Path,
+):
+    """Retain side-effect uncertainty as metadata for later Oracle validation."""
+    _write(tmp_path, "pkg/__init__.py", "")
+    _write(
+        tmp_path,
+        "pkg/risky.py",
+        "events = []\nevents.append('loaded')\n\nclass Risky:\n    pass\n",
+    )
+    _write(
+        tmp_path,
+        "tests/test_items.py",
+        "from pkg.risky import Risky\n\ndef test_target():\n    assert True\n",
+    )
+
+    analysis = ImportAnalyzer(tmp_path).analyze_pytest_node(
+        "tests/test_items.py::test_target"
+    )
+
+    assert [
+        (candidate.bound_name, candidate.risk_reason)
+        for candidate in analysis.candidates
+    ] == [("Risky", "side_effect_risk")]
+
+
+def test_target_analysis_proposes_static_all_reexport_with_companion_line(
+    tmp_path: Path,
+):
+    """Propose a target-unused re-export with its required __all__ update."""
+    _write(
+        tmp_path,
+        "src/acme/__init__.py",
+        "from .items import Needed, Other\n__all__ = ['Needed', 'Other']\n",
+    )
+    _write(
+        tmp_path,
+        "src/acme/items.py",
+        "class Needed:\n    pass\n\nclass Other:\n    pass\n",
+    )
+    _write(
+        tmp_path,
+        "tests/test_items.py",
+        "from acme import Needed, Other\n\n"
+        "def test_target():\n"
+        "    assert Needed is not None\n\n"
+        "def test_other():\n"
+        "    assert Other is not None\n",
+    )
+
+    analysis = ImportAnalyzer(tmp_path).analyze_pytest_node(
+        "tests/test_items.py::test_target"
+    )
+
+    assert {
+        (candidate.kind, candidate.bound_name, candidate.all_line)
+        for candidate in analysis.candidates
+    } == {
+        ("target_test_import", "Other", None),
+        ("target_reexport", "Other", 2),
+    }
+    assert _skip_reasons(analysis, "Needed") == {"target_entry_used"}
+
+
+def test_target_analysis_supports_class_method_nodes_and_cli(tmp_path: Path, capsys):
+    """Accept pytest class-method IDs without executing the target test."""
+    _write(tmp_path, "pkg/__init__.py", "")
+    _write(tmp_path, "pkg/items.py", "class Needed:\n    pass\n")
+    _write(
+        tmp_path,
+        "tests/test_items.py",
+        "from pkg.items import Needed\n\n"
+        "class TestItems:\n"
+        "    def test_target(self):\n"
+        "        assert Needed is not None\n",
+    )
+    source_digest = tree_digest(tmp_path)
+
+    status = main(
+        [
+            "analyze-imports",
+            str(tmp_path),
+            "--pytest-node",
+            "tests/test_items.py::TestItems::test_target[param]",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert status == 0
+    assert "Target import analysis" in captured.out
+    assert "Target pytest node:" in captured.out
+    assert "No Oracle executions." in captured.out
+    assert tree_digest(tmp_path) == source_digest
+
+
+def test_target_analysis_rejects_non_function_pytest_nodes(tmp_path: Path):
+    """Avoid guessing a target entry from custom or module-only node IDs."""
+    _write(tmp_path, "tests/test_items.py", "def test_target():\n    pass\n")
+
+    analyzer = ImportAnalyzer(tmp_path)
+
+    try:
+        analyzer.analyze_pytest_node("tests/test_items.py")
+    except ValueError as error:
+        assert "FILE::TEST" in str(error)
+    else:
+        raise AssertionError("expected an unsupported pytest node error")
 
 
 def _candidate_names(analysis) -> set[tuple[str, str]]:
