@@ -267,7 +267,10 @@ def _operation(
     ]
     if len(aliases) == len(node.names):
         return None
-    edits = [_Edit(*_range(source, node), _render_import(node, aliases))]
+    start, end = _range(source, node)
+    if not aliases:
+        end = _line_end(source, end)
+    edits = [_Edit(start, end, _render_import(node, aliases))]
     all_candidates = [item for item in candidates if item.all_line is not None]
     if all_candidates:
         all_edit = _render_all_edit(source, tree, all_candidates)
@@ -290,8 +293,8 @@ def _render_import(node: ast.Import | ast.ImportFrom, aliases: list[ast.alias]) 
     if not aliases:
         return ""
     if isinstance(node, ast.Import):
-        return f"import {names}\n"
-    return f"from {'.' * node.level + (node.module or '')} import {names}\n"
+        return f"import {names}"
+    return f"from {'.' * node.level + (node.module or '')} import {names}"
 
 
 def _render_all_edit(
@@ -326,7 +329,7 @@ def _render_all_edit(
     removed = {candidate.bound_name for candidate in candidates}
     return _Edit(
         *_range(source, node),
-        f"__all__ = {[name for name in names if name not in removed]!r}\n",
+        f"__all__ = {[name for name in names if name not in removed]!r}",
     )
 
 
@@ -342,6 +345,15 @@ def _range(source: str, node: ast.AST) -> tuple[int, int]:
     start = sum(len(line) for line in lines[: node.lineno - 1]) + node.col_offset
     end = sum(len(line) for line in lines[: node.end_lineno - 1]) + node.end_col_offset
     return start, end
+
+
+def _line_end(source: str, offset: int) -> int:
+    """Return the offset after an optional platform-neutral line ending."""
+    if source.startswith("\r\n", offset):
+        return offset + 2
+    if source.startswith("\n", offset):
+        return offset + 1
+    return offset
 
 
 def _apply(root: Path, operations: tuple[_Operation, ...]) -> dict[str, str]:
