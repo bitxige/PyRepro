@@ -28,9 +28,9 @@ def test_accepts_test_import_and_reexport_as_one_batch(tmp_path: Path):
         assert result.executions == 5
         test_source = (workspace.root / "tests/test_target.py").read_text()
         assert "from pkg import Needed\n" in test_source
+        assert "from pkg import Needed\n\n\ndef test_failure" not in test_source
         initializer = (workspace.root / "pkg/__init__.py").read_text()
-        assert "Ballast" not in initializer
-        assert "__all__ = ['Needed']" in initializer
+        assert initializer == "from .items import Needed\n__all__ = ['Needed']\n"
         assert result.probe_records[0].phase == "import_pruning"
         assert len(result.probe_records[0].candidate_descriptions) == 2
         assert result.source_unchanged
