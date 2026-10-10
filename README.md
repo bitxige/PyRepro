@@ -91,6 +91,23 @@ python -m pyrepro reduce examples/training_failure \
   -- python train.py
 ```
 
+## Read-only import analysis
+
+Use `analyze-imports` to inspect generic preprocessing candidates before any
+reduction. It supports common flat and `src` layouts, package re-exports, and
+relative imports, while reporting conservative skips for uncertain structures.
+It does not execute a reproduction command or modify the source project.
+
+```bash
+pyrepro analyze-imports ~/my_project
+```
+
+The report lists potential unused test-module imports and package re-exports,
+alongside explanations for skips such as dynamic imports, `import *`, unresolved
+modules, and obvious import-time side effects. A listed candidate is not proof
+that deletion is safe; a later reduction phase must validate any edit with the
+failure oracle.
+
 ## Included smoke fixtures
 
 - `examples/failing_project`: preserves `KeyError: 'width'` at
@@ -107,15 +124,14 @@ python -m pyrepro reduce examples/training_failure \
 
 ## Architecture and roadmap
 
-See [docs/architecture.md](docs/architecture.md) for the P3 data flow and
+See [docs/architecture.md](docs/architecture.md) for the reduction and
 retained static-analysis foundations. The broader goals and staged roadmap are
 in [docs/project-overview.md](docs/project-overview.md).
 
-Planned work after P3:
+Planned work after P5.1:
 
-- P4: configurable failure identity and Python repository-aware candidate
-  grouping/scheduling; and
-- P5: multi-file benchmark, reproducer packaging, and reporting.
+- P5.2: execution-verified batch import pruning; and
+- P5.3/P6: preprocessing-first reduction, budgets, packaging, and reporting.
 
 ## Development
 

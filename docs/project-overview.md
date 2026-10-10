@@ -33,7 +33,7 @@ PyRepro 是一个面向 Python 项目运行故障的自动复现缩减工具。�
 通过“删减后是否仍复现同一故障”的可执行判据进行搜索。完整决策记录见
 [`0007-pivot-to-failure-reduction.md`](decisions/0007-pivot-to-failure-reduction.md)。
 
-## 当前 P3
+## 当前 P5.1
 
 P1 将 P0 的最小闭环扩展到开发者明确选择的可信本地项目：
 
@@ -56,6 +56,11 @@ P3 在文件级缩减后的 workspace 中继续删除完整顶层 symbol：`func
 执行 oracle 决定删除是否接受。它分别记录 file/symbol phase 的执行次数和耗时，
 并且不处理 methods、statements 或 symbol-level ddmin。
 
+P5.1 增加只读的通用静态导入分析：它识别 flat / `src` 布局、常规 package、
+测试模块、内部 import 和 package re-export，并输出可能在后续阶段被验证的候选与
+保守跳过原因。该阶段不执行用户命令、不创建工作副本、不修改 source，也不将静态
+结果视为删除许可。
+
 P1 会重复执行用户提供的命令，因此只适用于用户信任的本地代码与命令。它不承诺
 通用仓库隔离、最小化全局最优解或任意命令的安全执行。
 
@@ -66,9 +71,12 @@ P1 会重复执行用户提供的命令，因此只适用于用户信任的本�
 | P0 | 命令驱动的 greedy 文件级缩减闭环（已完成） |
 | P1 | 可信本地项目命令支持、`--expect` 与候选忽略规则（已完成） |
 | P2 | 分组与 ddmin-inspired 文件缩减、oracle execution 指标与专用 benchmark（已完成） |
-| P3 | 基于 AST 的 execution-verified symbol 缩减（当前） |
-| P4 | 复用 Scanner / AST 的静态分析候选排序 |
-| P5 | 可携带 reproducer 打包与结果报告 |
+| P3 | 基于 AST 的 execution-verified symbol 缩减（已完成） |
+| P4 | Probe telemetry（已完成）；dependency-aware ordering 保持为实验性工作，不进入当前主线 |
+| P5.1 | 通用只读导入分析与候选报告（当前） |
+| P5.2 | 批量 import candidate 的 execution-verified 验证（后续） |
+| P5.3 | Preprocessing-first 文件缩减流水线（后续） |
+| P6 | 有预算的 Fast Mode 与交付闭环（后续） |
 
 ## 明确不做
 
