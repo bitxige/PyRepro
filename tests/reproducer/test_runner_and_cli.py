@@ -1,5 +1,6 @@
 """Tests for bounded argv execution and the P1 module command-line interface."""
 
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 import pytest
 from pyrepro.reproducer.__main__ import main
 from pyrepro.reproducer.runner import CommandRunner
+from pyrepro.reproducer.workspace import tree_digest
 
 FAILING_PROJECT = Path(__file__).parents[2] / "examples" / "failing_project"
 TRAINING_PROJECT = Path(__file__).parents[2] / "examples" / "training_failure"
@@ -62,6 +64,101 @@ def test_module_cli_writes_a_verified_reduced_project(tmp_path: Path, capsys):
     assert "Probe telemetry" in captured.out
     assert "Different failures:" in captured.out
     assert (output / "reproduce.py").is_file()
+
+
+def test_module_cli_optionally_writes_jsonl_probe_records(tmp_path: Path, capsys):
+    """Exported telemetry must describe probes without changing reduction output."""
+    without_report = tmp_path / "without-report"
+    with_report = tmp_path / "with-report"
+    report = tmp_path / "probes.jsonl"
+
+    assert (
+        main(
+            [
+                "reduce",
+                str(FAILING_PROJECT),
+                "--output",
+                str(without_report),
+                "--",
+                sys.executable,
+                "reproduce.py",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    assert (
+        main(
+            [
+                "reduce",
+                str(FAILING_PROJECT),
+                "--output",
+                str(with_report),
+                "--probe-records",
+                str(report),
+                "--",
+                sys.executable,
+                "reproduce.py",
+            ]
+        )
+        == 0
+    )
+    captured = capsys.readouterr()
+
+    records = [json.loads(line) for line in report.read_text().splitlines()]
+    assert tree_digest(with_report) == tree_digest(without_report)
+    assert "Probe records:" in captured.out
+    assert len(records) == 12
+    assert {
+        "accepted",
+        "candidate",
+        "duration_seconds",
+        "elapsed_seconds",
+        "failure_message",
+        "failure_signature",
+        "failure_type",
+        "outcome",
+        "phase",
+        "probe_id",
+        "remaining_python_loc",
+        "return_code",
+    } <= records[0].keys()
+    assert [record["probe_id"] for record in records] == list(
+        range(1, len(records) + 1)
+    )
+    assert {record["phase"] for record in records} == {"greedy"}
+    assert all(record["candidate"] for record in records)
+    assert any(record["accepted"] for record in records)
+    assert all(isinstance(record["remaining_python_loc"], int) for record in records)
+    assert [record["elapsed_seconds"] for record in records] == sorted(
+        record["elapsed_seconds"] for record in records
+    )
+
+
+def test_module_cli_rejects_probe_records_inside_source_project(tmp_path: Path, capsys):
+    """Keep the optional telemetry artifact out of the protected source tree."""
+    report = FAILING_PROJECT / "probes.jsonl"
+
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "reduce",
+                str(FAILING_PROJECT),
+                "--output",
+                str(tmp_path / "output"),
+                "--probe-records",
+                str(report),
+                "--",
+                sys.executable,
+                "reproduce.py",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert error.value.code == 2
+    assert "probe report path must be outside the source root" in captured.err
+    assert not report.exists()
 
 
 def test_module_cli_reduces_a_trusted_local_training_project(tmp_path: Path, capsys):

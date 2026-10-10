@@ -12,6 +12,10 @@ from pyrepro.reproducer.failure import (
     ReductionOutcome,
     classify_result,
 )
+from pyrepro.reproducer.probe_report import (
+    validate_probe_report_path,
+    write_probe_records,
+)
 from pyrepro.reproducer.reducer import (
     DdminFileReducer,
     GreedyFileReducer,
@@ -81,6 +85,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="file",
         help="stop after file reduction or continue with symbols (default: file)",
     )
+    reduce_parser.add_argument(
+        "--probe-records",
+        type=Path,
+        help=(
+            "write optional file-reduction probe telemetry as new JSONL outside "
+            "the source project"
+        ),
+    )
     arguments = list(sys.argv[1:] if argv is None else argv)
     try:
         command_separator = arguments.index("--")
@@ -94,6 +106,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not source.is_dir():
         parser.error(f"source root is not a directory: {source}")
     output = args.output or _default_output_directory(source)
+    try:
+        probe_report = (
+            None
+            if args.probe_records is None
+            else validate_probe_report_path(args.probe_records, source)
+        )
+    except ValueError as error:
+        parser.error(str(error))
 
     print("Warning: PyRepro will repeatedly execute the supplied command.")
     print("Only run a project and command that you trust.")
@@ -129,6 +149,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if output_outcome is not ReductionOutcome.SAME_FAILURE:
         parser.error("copied reduced project did not reproduce the baseline failure")
 
+    if probe_report is not None:
+        write_probe_records(probe_report, file_result)
+
     print(format_reduction_summary(file_result))
     if symbol_result is not None:
         print()
@@ -142,6 +165,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{file_result.wall_clock_seconds + symbol_result.wall_clock_seconds:.3f}"
         )
     print(f"Reduced project: {destination}")
+    if probe_report is not None:
+        print(f"Probe records: {probe_report}")
     return 0
 
 

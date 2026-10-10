@@ -75,10 +75,18 @@ functions, async functions, and classes within the retained files. AST only
 locates original source ranges, including decorators; the runtime failure oracle
 is still the only acceptance criterion.
 
+`--probe-records <path>` optionally writes one JSONL object for each
+file-reduction candidate probe. Each record includes the phase, proposed
+candidate paths, oracle outcome, acceptance decision, command duration,
+cumulative command time, proposed candidate Python LOC, return code, parsed
+exception details, and failure signature. The path must be new and outside the
+source project. This observability output does not alter reduction decisions.
+
 The module entry point is equivalent:
 
 ```bash
 python -m pyrepro reduce examples/training_failure \
+  --probe-records /tmp/pyrepro-probes.jsonl \
   --expect "operands could not be broadcast" \
   -- python train.py
 ```
