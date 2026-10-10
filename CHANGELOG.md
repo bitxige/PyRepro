@@ -7,6 +7,9 @@ experiments remain available through Git history.
 
 ### Added
 
+- Added the P5.3a `PreprocessingFirstReducer`, which reuses one disposable
+  workspace and one established failure signature across verified import
+  pruning and existing greedy file reduction while retaining phase telemetry.
 - Added `pyrepro prune-imports` for bounded, execution-verified batches of
   target-aware import and static `__all__` re-export edits. It works only in a
   disposable workspace, restores rejected batches before bounded splitting,

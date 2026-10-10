@@ -192,11 +192,18 @@ class GreedyFileReducer:
         self.match_mode = match_mode
         self.ignored_directory_names = frozenset(ignored_directory_names)
 
-    def reduce(self, workspace: ReductionWorkspace) -> ReductionResult:
+    def reduce(
+        self,
+        workspace: ReductionWorkspace,
+        baseline_signature: FailureSignature | None = None,
+    ) -> ReductionResult:
         """Run greedy file reduction in an active disposable workspace.
 
         Args:
             workspace: Active disposable project copy to mutate.
+            baseline_signature: Already-verified failure signature to reuse for
+                a composed reduction stage. When omitted, this reducer
+                establishes its normal three-run baseline.
 
         Returns:
             Verified greedy reduction result.
@@ -205,13 +212,18 @@ class GreedyFileReducer:
             UnstableBaselineError: If baseline or final verification is unstable.
         """
         started_at = perf_counter()
-        baseline_signature, executions = _establish_baseline(
-            self.runner,
-            workspace.root,
-            self.baseline_runs,
-            self.expected_text,
-            self.match_mode,
-        )
+        if baseline_signature is None:
+            baseline_signature, executions = _establish_baseline(
+                self.runner,
+                workspace.root,
+                self.baseline_runs,
+                self.expected_text,
+                self.match_mode,
+            )
+            baseline_runs = self.baseline_runs
+        else:
+            executions = 0
+            baseline_runs = 0
         candidates = _python_files(workspace.root, self.ignored_directory_names)
         initial_lines = _python_line_count(candidates)
         decisions: list[FileDecision] = []
@@ -263,7 +275,7 @@ class GreedyFileReducer:
             strategy="greedy",
             baseline_signature=baseline_signature,
             failure_match_mode=self.match_mode,
-            baseline_runs=self.baseline_runs,
+            baseline_runs=baseline_runs,
             initial_python_files=len(candidates),
             remaining_python_files=len(remaining),
             initial_python_lines=initial_lines,

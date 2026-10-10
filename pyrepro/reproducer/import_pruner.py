@@ -33,6 +33,7 @@ class ImportPruningResult:
     """Final-verified result of a target-aware import-pruning run."""
 
     baseline_signature: FailureSignature
+    baseline_runs: int
     candidates_discovered: int
     editable_operations: int
     skipped_candidates: int
@@ -101,16 +102,32 @@ class BatchImportPruner:
         self.match_mode = match_mode
         self.max_probes = max_probes
 
-    def prune(self, workspace: ReductionWorkspace) -> ImportPruningResult:
-        """Run baseline, bounded batch probes, rollback, and final verification."""
+    def prune(
+        self,
+        workspace: ReductionWorkspace,
+        baseline_signature: FailureSignature | None = None,
+    ) -> ImportPruningResult:
+        """Run bounded probes and final verification in a workspace.
+
+        Args:
+            workspace: Active disposable workspace to edit.
+            baseline_signature: Existing stable signature from an earlier
+                composed stage. When omitted, establishes the normal baseline.
+        """
         started = perf_counter()
-        baseline, executions = _establish_baseline(
-            self.runner,
-            workspace.root,
-            self.baseline_runs,
-            self.expected_text,
-            self.match_mode,
-        )
+        if baseline_signature is None:
+            baseline, executions = _establish_baseline(
+                self.runner,
+                workspace.root,
+                self.baseline_runs,
+                self.expected_text,
+                self.match_mode,
+            )
+            baseline_runs = self.baseline_runs
+        else:
+            baseline = baseline_signature
+            executions = 0
+            baseline_runs = 0
         analysis = ImportAnalyzer(workspace.root).analyze_pytest_node(self.pytest_node)
         operations, skipped = _build_operations(workspace.root, analysis.candidates)
         initial_lines = _line_count(workspace.root)
@@ -142,6 +159,7 @@ class BatchImportPruner:
             )
         return ImportPruningResult(
             baseline_signature=baseline,
+            baseline_runs=baseline_runs,
             candidates_discovered=len(analysis.candidates),
             editable_operations=len(operations),
             skipped_candidates=skipped,

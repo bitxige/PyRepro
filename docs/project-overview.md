@@ -89,7 +89,8 @@ P1 会重复执行用户提供的命令，因此只适用于用户信任的本�
 | P5.1 | 通用只读导入分析与候选报告（已完成） |
 | P5.2a/b | 目标 pytest 入口感知的只读候选分析（已完成） |
 | P5.2c | 有界批量 import candidate 的 execution-verified 验证（当前） |
-| P5.3 | Preprocessing-first 文件缩减流水线（后续） |
+| P5.3a | Import Pruning 与 Greedy 的同 workspace 组合验证（当前） |
+| P5.3b | 通用粗粒度预缩减与流水线扩展（后续） |
 | P6 | 有预算的 Fast Mode 与交付闭环（后续） |
 
 ## 明确不做
