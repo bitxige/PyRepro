@@ -8,7 +8,8 @@ user-specified runtime failure. Its central principle is:
 > Static analysis guides reduction; execution validates it.
 
 P3 implements execution-verified file reduction followed by optional
-source-symbol reduction:
+source-symbol reduction. P5.1 also provides a read-only static-analysis entry
+point; it is intentionally outside the execution-reduction path:
 
 ```text
 Trusted local project + argv reproduction command
@@ -31,6 +32,14 @@ Trusted local project + argv reproduction command
                     |
                     v
           Verified reduced project copy
+
+pyrepro analyze-imports <source>
+                    |
+                    v
+  Repository discovery + syntax-only import analysis
+                    |
+                    v
+ candidates and conservative skips; no Oracle and no source edits
 ```
 
 The source project is never modified. A deletion is accepted only when the
@@ -49,7 +58,8 @@ pyrepro/
 │   └── symbol_reducer.py      # AST source spans and greedy symbol reduction
 ├── scanner/
 │   ├── repository_scanner.py  # retained static repository inventory
-│   └── ast_analyzer.py        # retained syntax-level facts
+│   ├── ast_analyzer.py        # retained syntax-level facts
+│   └── import_analyzer.py     # read-only import candidates and skip reasons
 └── path_utils.py              # retained repository-path validation
 ```
 
@@ -64,11 +74,17 @@ The CLI accepts:
 ```text
 pyrepro reduce <source> [--expect TEXT] [--strategy greedy|ddmin]
     [--max-granularity file|symbol] [--output PATH] -- <argv...>
+
+pyrepro analyze-imports <source>
 ```
 
 It warns that the command will be executed repeatedly and requires users to
 provide trusted local code and a trusted argv command. Without `--output`, the
 result is written to a sibling `.pyrepro-output/<source-name>` directory.
+
+`analyze-imports` is deliberately separate from `reduce`: it accepts no
+reproduction command, never creates a reduction workspace, and only prints
+syntax-derived import-pruning proposals with their conservative skip reasons.
 
 ### `reproducer.runner`
 
@@ -135,9 +151,13 @@ unparsable files skipped during discovery.
 
 ## Retained static-analysis foundation
 
-`RepositoryScanner`, `AstAnalyzer`, and `path_utils` are retained but are not
-wired into P3's reducers. A later stage may use their deterministic facts
-to prioritize candidates; execution remains the authority that accepts or
+`RepositoryScanner`, `AstAnalyzer`, `ImportAnalyzer`, and `path_utils` provide
+read-only structural facts. `ImportAnalyzer` discovers flat / `src` source
+roots, imports, conventional test modules, and package re-exports without
+executing code. It treats wildcard imports, dynamic imports, unresolved
+modules, and obvious import-time side effects as conservative skips. It is not
+wired into the reducers in P5.1; a later stage may use its deterministic facts
+to build candidates, while execution remains the authority that accepts or
 rejects every deletion.
 
 ## P3 trust boundary

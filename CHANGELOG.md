@@ -7,6 +7,10 @@ experiments remain available through Git history.
 
 ### Added
 
+- Added `pyrepro analyze-imports`, a read-only generic analysis command for
+  flat and `src` layouts that reports potential unused test imports and package
+  re-exports with conservative skip reasons. It does not execute a command or
+  modify the source project.
 - Added optional `--probe-records` JSONL export for structured file-reduction
   telemetry, including per-probe outcome, timing, candidate LOC, and parsed
   failure details without changing reduction decisions. Reports are atomically

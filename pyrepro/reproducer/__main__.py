@@ -28,6 +28,7 @@ from pyrepro.reproducer.symbol_reducer import (
     format_symbol_reduction_summary,
 )
 from pyrepro.reproducer.workspace import ReductionWorkspace
+from pyrepro.scanner.import_analyzer import ImportAnalyzer, format_import_analysis
 
 _DEFAULT_OUTPUT_DIRECTORY_NAME = ".pyrepro-output"
 
@@ -48,6 +49,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     reduce_parser = subparsers.add_parser(
         "reduce", help="reduce one trusted local project"
     )
+    analyze_parser = subparsers.add_parser(
+        "analyze-imports",
+        help="inspect Python import-pruning candidates without execution",
+    )
+    analyze_parser.add_argument("source", type=Path, help="local project root")
     reduce_parser.add_argument("source", type=Path, help="trusted local project root")
     reduce_parser.add_argument(
         "--output",
@@ -94,6 +100,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "analyze-imports":
+        return _analyze_imports(parser, arguments)
     try:
         command_separator = arguments.index("--")
     except ValueError:
@@ -173,6 +181,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"Reduced project: {destination}")
     if probe_report is not None:
         print(f"Probe records: {probe_report}")
+    return 0
+
+
+def _analyze_imports(parser: argparse.ArgumentParser, arguments: Sequence[str]) -> int:
+    """Run static import analysis without running a reproduction command."""
+    args = parser.parse_args(arguments)
+    source = args.source.expanduser().resolve()
+    if not source.is_dir():
+        parser.error(f"source root is not a directory: {source}")
+    try:
+        analysis = ImportAnalyzer(source).analyze()
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    print(format_import_analysis(analysis))
     return 0
 
 
