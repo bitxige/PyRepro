@@ -151,6 +151,30 @@ def test_import_analyzer_marks_side_effects_without_dynamic_imports(tmp_path: Pa
     assert _skip_reasons(analysis, "SideEffect") == {"side_effect_risk"}
 
 
+def test_import_analyzer_traces_import_time_side_effect_dependencies(tmp_path: Path):
+    """Skip a wrapper whose own top-level import has observable side effects."""
+    _write(tmp_path, "pkg/__init__.py", "")
+    _write(
+        tmp_path,
+        "pkg/registration.py",
+        "events = []\nevents.append('registered')\n",
+    )
+    _write(
+        tmp_path,
+        "pkg/wrapper.py",
+        "from . import registration\n\nclass Wrapper:\n    pass\n",
+    )
+    _write(
+        tmp_path,
+        "tests/test_wrapper.py",
+        "from pkg.wrapper import Wrapper\n",
+    )
+
+    analysis = ImportAnalyzer(tmp_path).analyze()
+
+    assert _skip_reasons(analysis, "Wrapper") == {"side_effect_risk"}
+
+
 def test_import_analyzer_skips_public_and_unresolved_package_imports(
     tmp_path: Path,
 ):

@@ -302,13 +302,53 @@ class _ModuleIndex:
     def side_effect_free(self, module: str, facts: dict[str, _ModuleFacts]) -> bool:
         parts = module.split(".")
         for length in range(1, len(parts) + 1):
-            path = self.path_for_module(".".join(parts[:length]))
-            if (
-                path is not None
-                and facts.get(path, _UNKNOWN_FACTS).top_level_side_effect_risk
-            ):
+            parent = ".".join(parts[:length])
+            if self.path_for_module(parent) is None:
+                continue
+            if not self._module_is_side_effect_free(parent, facts, set()):
                 return False
         return True
+
+    def _module_is_side_effect_free(
+        self,
+        module: str,
+        facts: dict[str, _ModuleFacts],
+        visiting: set[str],
+    ) -> bool:
+        """Conservatively inspect one module's import-time dependency surface."""
+        if module in visiting:
+            return True
+        path = self.path_for_module(module)
+        if path is None:
+            return False
+        fact = facts.get(path, _UNKNOWN_FACTS)
+        if fact.top_level_side_effect_risk:
+            return False
+        visiting.add(module)
+        try:
+            for binding in fact.imports:
+                if not binding.is_top_level:
+                    continue
+                imported_module = self.binding_module(binding)
+                if binding.is_star or imported_module is None:
+                    return False
+                if not self._module_is_side_effect_free(
+                    imported_module, facts, visiting
+                ):
+                    return False
+        finally:
+            visiting.remove(module)
+        return True
+
+    def binding_module(self, binding: _ImportBinding) -> str | None:
+        """Return the concrete internal module loaded by one binding when known."""
+        if binding.imported_module is None:
+            return None
+        if binding.imported_name is not None:
+            submodule = f"{binding.imported_module}.{binding.imported_name}"
+            if self.path_for_module(submodule) is not None:
+                return submodule
+        return binding.imported_module
 
 
 _UNKNOWN_FACTS = _ModuleFacts(
@@ -700,7 +740,7 @@ def _consider_binding(
     if binding.bound_name in fact.loaded_names:
         _skip(binding, skips, "binding_used", "bound name has a static load")
         return
-    module = binding.imported_module
+    module = index.binding_module(binding)
     if module is None:
         _skip(binding, skips, "unresolved_relative_import", "relative base is unknown")
         return
