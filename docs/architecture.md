@@ -7,9 +7,9 @@ user-specified runtime failure. Its central principle is:
 
 > Static analysis guides reduction; execution validates it.
 
-P3 implements execution-verified file reduction followed by optional
-source-symbol reduction. P5.2c adds a deliberately separate, execution-
-verified import-pruning operation before a later P5.3 composition stage:
+PyRepro implements execution-verified file reduction followed by optional
+source-symbol reduction. Its opt-in Fast Mode composes target-aware import
+pruning, bounded coarse deletion, greedy cleanup, and verified publication:
 
 ```text
 Trusted local project + argv reproduction command
@@ -32,6 +32,15 @@ Trusted local project + argv reproduction command
                     |
                     v
           Verified reduced project copy
+
+pyrepro reduce <source> --mode fast --pytest-node FILE::[CLASS::]TEST
+    --max-oracle-executions N -- <argv...>
+                    |
+                    v
+  shared baseline -> import pruning -> coarse groups -> greedy cleanup
+                    |
+                    v
+      sibling staging -> independent 3/3 -> atomic no-clobber publication
 
 pyrepro analyze-imports <source> [--pytest-node FILE::[CLASS::]TEST]
                     |
@@ -67,6 +76,10 @@ pyrepro/
 │   ├── workspace.py           # disposable copies and source-integrity checks
 │   ├── reducer.py             # greedy/grouped reduction and candidate exclusions
 │   ├── import_pruner.py        # bounded verified source-local import pruning
+│   ├── preprocessing.py        # shared-workspace preprocessing-first pipeline
+│   ├── coarse_reducer.py       # bounded generic directory-group probes
+│   ├── budget.py               # Fast-Mode shared Oracle/time budget
+│   ├── publisher.py            # staging verification and verified publication
 │   ├── probe_report.py         # atomic opt-in JSONL probe telemetry
 │   └── symbol_reducer.py      # AST source spans and greedy symbol reduction
 ├── scanner/
@@ -183,6 +196,23 @@ the existing exact failure signature remains after execution. The reducer
 reparses current source after accepted deletions so later ranges are not stale.
 It does not mutate ASTs with `ast.unparse`, delete methods or statements, or
 claim global or symbol-level 1-minimality.
+
+### Fast Mode composition and publishing
+
+`PreprocessingFirstReducer` shares one workspace and baseline across verified
+import pruning, optional `CoarseFileReducer` directory-group probes, and
+`GreedyFileReducer` cleanup. In Fast Mode, all Oracle invocations pass through
+one `ExecutionBudget`: it reserves three executions for final verification and
+uses a monotonic deadline to bound each command timeout. A budgeted pipeline
+does not repeat stage-final checks; it retains only individually accepted
+workspace changes.
+
+The CLI is an orchestration layer. It passes the final workspace and established
+signature to `verify_and_publish`, which creates sibling staging, runs the
+independent final 3/3 there, and atomically publishes only on success. Linux
+publication requires `renameat2(RENAME_NOREPLACE)`; there is no unsafe rename
+fallback. The publisher owns output no-clobber and source-integrity rules; the
+CLI maps its structured terminal states to user-facing output and exit status.
 
 P3 reports file-phase and symbol-phase oracle execution counts and wall-clock
 durations separately, as well as symbol counts, symbol probe outcomes, and

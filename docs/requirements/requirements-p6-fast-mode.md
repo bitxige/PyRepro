@@ -6,7 +6,9 @@ P6 is implemented in small, separately reviewable changes. P6a defines the
 execution-budget contract only; it does not change a reducer's candidate
 ordering or acceptance rule. P6b makes existing reduction probes transactional
 at a shared budget boundary. P6c provides staging verification and verified
-publication as an internal API; the explicit CLI entry point remains P6d.
+publication. P6d exposes the existing composition through `pyrepro reduce
+--mode fast` without duplicating reducer, budget, source-integrity, or
+publication decisions in the CLI.
 
 ## Objective
 
@@ -99,6 +101,28 @@ the budget into Import, Coarse, Greedy, CLI, staging, or publication.
   a structured terminal result and removes every unpublished staging directory.
   It does not add a CLI entry point.
 - P6d: explicit CLI integration, reporting, and end-to-end tests.
+
+## CLI contract
+
+Fast Mode is opt-in through the existing `reduce` command. It requires an
+explicit pytest node and a global Oracle-command budget:
+
+```text
+pyrepro reduce SOURCE --mode fast --pytest-node FILE::[CLASS::]TEST
+    --max-oracle-executions N [--max-time-seconds SECONDS] -- ARGV...
+```
+
+The CLI is an orchestration and display layer only. It creates the shared
+budget, invokes the existing preprocessing-first reducer, then passes the
+accepted workspace to `verify_and_publish`. In particular, output no-clobber
+and source-integrity safety remain publisher responsibilities.
+
+`completed` and `budget_exhausted_verified` exit successfully only after an
+official output was published. The latter message must explicitly state that
+search stopped for the budget but the candidate passed final independent 3/3
+verification. All unpublished terminal states exit nonzero and state that no
+official reproducer was created. Fast Mode rejects incompatible `ddmin` and
+symbol-reduction arguments rather than silently ignoring them.
 
 ## Non-goals
 

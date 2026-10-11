@@ -7,6 +7,12 @@ experiments remain available through Git history.
 
 ### Added
 
+- Added opt-in `pyrepro reduce --mode fast` CLI integration for the existing
+  preprocessing-first pipeline, shared Oracle/time budgets, staging 3/3
+  verification, and verified no-clobber publication. Fast Mode requires an
+  explicit pytest node and Oracle budget, reports structured terminal outcomes,
+  and never claims an official output when final verification did not publish.
+
 - Added the P5.3a `PreprocessingFirstReducer`, which reuses one disposable
   workspace and one established failure signature across verified import
   pruning and existing greedy file reduction while retaining phase telemetry.

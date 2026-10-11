@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from pyrepro.reproducer import probe_report
 from pyrepro.reproducer.__main__ import main
+from pyrepro.reproducer.publisher import FastModeTerminalState, PublishingResult
 from pyrepro.reproducer.runner import CommandRunner
 from pyrepro.reproducer.workspace import tree_digest
 
@@ -404,3 +405,240 @@ def test_module_cli_runs_symbol_reduction_after_the_file_strategy(
     assert "RewardComparisonArchive" not in (
         output / "reward" / "shaping.py"
     ).read_text(encoding="utf-8")
+
+
+def test_fast_mode_cli_publishes_a_verified_reproducer(tmp_path: Path, capsys):
+    """Wire target-aware reduction, final verification, and publication together."""
+    source = tmp_path / "source"
+    output = tmp_path / "verified-output"
+    _fast_project(source)
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--mode",
+            "fast",
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--max-oracle-executions",
+            "7",
+            "--max-coarse-probes",
+            "0",
+            "--output",
+            str(output),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert "accepted candidate passed final 3/3 verification" in captured.out
+    assert f"Published reproducer: {output}" in captured.out
+    assert "Final verification: 3/3 passed" in captured.out
+    assert (output / "run_target.py").is_file()
+    assert "from ballast import Unneeded" not in (
+        output / "tests/test_target.py"
+    ).read_text(encoding="utf-8")
+
+
+def test_fast_mode_cli_minimum_budget_reserves_final_verification(
+    tmp_path: Path, capsys
+):
+    """Six commands safely publish a verified candidate without search probes."""
+    source = tmp_path / "source"
+    output = tmp_path / "verified-output"
+    _fast_project(source)
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--mode",
+            "fast",
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--max-oracle-executions",
+            "6",
+            "--max-coarse-probes",
+            "0",
+            "--output",
+            str(output),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert "Search probes: 0" in captured.out
+    assert "accepted candidate passed final 3/3 verification" in captured.out
+    assert (output / "run_target.py").is_file()
+    assert "from ballast import Unneeded" in (
+        output / "tests/test_target.py"
+    ).read_text(encoding="utf-8")
+
+
+def test_fast_mode_cli_leaves_existing_output_to_verified_publisher(
+    tmp_path: Path, capsys
+):
+    """The CLI reports publisher rejection without duplicating no-clobber checks."""
+    source = tmp_path / "source"
+    output = tmp_path / "existing-output"
+    _fast_project(source)
+    output.mkdir()
+    marker = output / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--mode",
+            "fast",
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--max-oracle-executions",
+            "6",
+            "--max-coarse-probes",
+            "0",
+            "--output",
+            str(output),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert status == 1
+    assert "Fast Mode failed: runtime_error" in captured.err
+    assert "output directory already exists" in captured.err
+    assert "No official reproducer was published." in captured.err
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.parametrize(
+    ("state", "message"),
+    [
+        (
+            FastModeTerminalState.BUDGET_EXHAUSTED_UNVERIFIED,
+            "the budget ended before final 3/3 verification completed",
+        ),
+        (
+            FastModeTerminalState.FINAL_VERIFICATION_FAILED,
+            "final verification did not reproduce the baseline failure",
+        ),
+        (FastModeTerminalState.SOURCE_CHANGED, "the protected source changed"),
+    ],
+)
+def test_fast_mode_cli_maps_unpublished_terminal_states(
+    tmp_path: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+    state: FastModeTerminalState,
+    message: str,
+):
+    """Map existing unpublished publisher states through the public CLI."""
+    source = tmp_path / "source"
+    output = tmp_path / "unpublished-output"
+    _fast_project(source)
+
+    def unpublished_result(*args, **kwargs):
+        budget = args[5]
+        return PublishingResult(
+            state=state,
+            output_path=None,
+            verification_attempts=(),
+            source_unchanged=state is not FastModeTerminalState.SOURCE_CHANGED,
+            budget=budget.snapshot(),
+        )
+
+    monkeypatch.setattr(
+        "pyrepro.reproducer.__main__.verify_and_publish", unpublished_result
+    )
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--mode",
+            "fast",
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--max-oracle-executions",
+            "6",
+            "--max-coarse-probes",
+            "0",
+            "--output",
+            str(output),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert status == 1
+    assert f"Fast Mode failed: {message}" in captured.out
+    assert "No official reproducer was published." in captured.out
+    assert "Published reproducer:" not in captured.out
+    assert not output.exists()
+
+
+def test_fast_mode_cli_requires_compatible_fast_arguments(tmp_path: Path):
+    """Reject unsupported Fast-Mode combinations rather than ignoring them."""
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "reduce",
+                str(tmp_path),
+                "--mode",
+                "fast",
+                "--max-oracle-executions",
+                "6",
+                "--",
+                sys.executable,
+                "-c",
+                "raise ValueError('failure')",
+            ]
+        )
+
+    assert error.value.code == 2
+
+
+def _fast_project(root: Path) -> None:
+    """Create one small target-aware project for Fast-Mode CLI coverage."""
+    _write(root, "pkg/__init__.py", "from .needed import Needed\n")
+    _write(root, "pkg/needed.py", "class Needed:\n    pass\n")
+    _write(root, "ballast.py", "class Unneeded:\n    pass\n")
+    _write(root, "tests/__init__.py", "")
+    _write(
+        root,
+        "tests/test_target.py",
+        "from ballast import Unneeded\nfrom pkg import Needed\n\n"
+        "def test_failure():\n"
+        "    assert Needed is not None\n"
+        "    raise ValueError('target failure')\n\n"
+        "def test_unrelated():\n"
+        "    assert Unneeded is not None\n",
+    )
+    _write(
+        root,
+        "run_target.py",
+        "from tests.test_target import test_failure\ntest_failure()\n",
+    )
+
+
+def _write(root: Path, relative_path: str, content: str) -> None:
+    """Write one UTF-8 fixture file under a project root."""
+    path = root / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
