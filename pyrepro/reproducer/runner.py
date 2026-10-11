@@ -53,21 +53,31 @@ class CommandRunner:
         self.command = tuple(command)
         self.timeout_seconds = timeout_seconds
 
-    def run(self, working_directory: Path) -> ExecutionResult:
+    def run(
+        self, working_directory: Path, *, timeout_seconds: float | None = None
+    ) -> ExecutionResult:
         """Run the configured command without invoking a shell.
 
         Args:
             working_directory: Existing directory used as the process cwd.
+            timeout_seconds: Optional per-invocation timeout. When omitted, uses
+                the configured runner timeout. It must be positive when supplied.
 
         Returns:
             Captured process result or a timeout result.
 
         Raises:
-            ValueError: If the supplied working directory is not a directory.
+            ValueError: If the supplied working directory is not a directory or
+                the supplied per-invocation timeout is not positive.
         """
         cwd = working_directory.expanduser().resolve()
         if not cwd.is_dir():
             raise ValueError(f"working directory is not a directory: {cwd}")
+        effective_timeout = (
+            self.timeout_seconds if timeout_seconds is None else timeout_seconds
+        )
+        if effective_timeout <= 0:
+            raise ValueError("timeout_seconds must be positive")
         environment = dict(os.environ)
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
         try:
@@ -79,7 +89,7 @@ class CommandRunner:
                 env=environment,
                 shell=False,
                 text=True,
-                timeout=self.timeout_seconds,
+                timeout=effective_timeout,
             )
         except subprocess.TimeoutExpired as error:
             return ExecutionResult(
