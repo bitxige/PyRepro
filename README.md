@@ -19,11 +19,13 @@ Its guiding principle is:
 
 ## Current status
 
-P3 supports a developer-selected **trusted local** Python project and an argv
-reproduction command. PyRepro establishes a stable Python failure signature,
+PyRepro supports a developer-selected **trusted local** Python project and an
+argv reproduction command. It establishes a stable Python failure signature,
 works in a disposable copy, and verifies the same failure in the final output.
-It provides P1 greedy and P2 grouped file strategies, plus optional P3
-execution-verified reduction of complete top-level Python symbols.
+It provides greedy and grouped file strategies, optional top-level symbol
+reduction, and an opt-in Fast Mode that composes import pruning, bounded coarse
+file reduction, greedy cleanup, final staging verification, and safe output
+publication.
 
 PyRepro runs the supplied command repeatedly. It does not install dependencies
 or modify the source project, but it is not an execution sandbox. Only use it
@@ -91,6 +93,50 @@ python -m pyrepro reduce examples/training_failure \
   --expect "operands could not be broadcast" \
   -- python train.py
 ```
+
+## Fast Mode
+
+Fast Mode is an explicit, budgeted workflow for producing a verified
+reproducer. It uses target-aware import pruning, optional coarse file probes,
+and greedy cleanup under one global Oracle-command budget. The output is copied
+to staging and independently verified three times before PyRepro publishes it.
+
+```bash
+pyrepro reduce ~/my_project \
+  --mode fast \
+  --pytest-node tests/test_example.py::test_failure \
+  --max-oracle-executions 60 \
+  --max-time-seconds 120 \
+  --max-import-probes 16 \
+  --max-coarse-probes 16 \
+  --output /tmp/reduced-example \
+  -- python run_target.py
+```
+
+`--mode fast` requires both `--pytest-node` and
+`--max-oracle-executions`. It supports the existing greedy file cleanup only;
+`--strategy ddmin` and `--max-granularity symbol` are rejected instead of being
+silently ignored. `--max-coarse-probes 0` disables the optional coarse stage.
+
+The command budget reserves three executions for final independent verification.
+The minimum budget is six executions: three to establish the baseline and three
+to verify the staged output. A six-execution run has no search probes available;
+it can safely publish the unchanged accepted workspace after final 3/3
+verification, but does not promise additional minimization.
+
+Fast Mode prints one of these user-visible outcomes:
+
+- `completed`: reduction finished and a final 3/3-verified reproducer was
+  published.
+- `budget_exhausted_verified`: search stopped for the configured budget, but
+  the accepted candidate passed final 3/3 verification and was published.
+- an unpublished failure: no official reproducer is created when final
+  verification cannot complete, fails to match, the source changes, or a
+  runtime/publication error occurs.
+
+On Linux, publication uses an atomic no-clobber operation. The requested
+output path must be new and outside the source project. Fast Mode fails safely
+on platforms or filesystems that cannot provide that publication guarantee.
 
 ## Read-only import analysis
 
@@ -168,9 +214,8 @@ See [docs/architecture.md](docs/architecture.md) for the reduction and
 retained static-analysis foundations. The broader goals and staged roadmap are
 in [docs/project-overview.md](docs/project-overview.md).
 
-Planned work after P5.2c:
-
-- P5.3/P6: preprocessing-first reduction, budgets, packaging, and reporting.
+See `docs/requirements/requirements-p6-fast-mode.md` for Fast Mode's budget,
+verification, and publication contract.
 
 ## Development
 

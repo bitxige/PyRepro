@@ -33,7 +33,7 @@ PyRepro 是一个面向 Python 项目运行故障的自动复现缩减工具。�
 通过“删减后是否仍复现同一故障”的可执行判据进行搜索。完整决策记录见
 [`0007-pivot-to-failure-reduction.md`](decisions/0007-pivot-to-failure-reduction.md)。
 
-## 当前 P5.2c
+## 当前 P6
 
 P1 将 P0 的最小闭环扩展到开发者明确选择的可信本地项目：
 
@@ -74,6 +74,16 @@ failure oracle 确认同一故障后接受。静态 `__all__` re-export 会与�
 原子编辑。复杂、多行、动态或通配导入会保守跳过。P5.2c 不启动任何文件/symbol 缩减，
 也不针对特定仓库目录或模块写规则。
 
+P5.3 将经验证的 import pruning、可选的通用目录粗粒度删除和既有 greedy cleanup
+组合到同一 `ReductionWorkspace` 中；它复用一次 baseline 和 probe telemetry。真实
+Tactics2D 对照表明，在固定受控故障案例中，该预处理优先流水线同时改善缩减质量和
+执行成本；它不构成对所有 Python 仓库的性能承诺。
+
+P6 Fast Mode 将该流水线置于一个共享的 Oracle 执行/时间预算下。未接受 probe 的
+修改会回滚，已接受的 workspace 始终保留。当前 Fast Mode CLI 会把候选复制到 staging
+目录，在其中完成独立 3/3 验证后，才以 Linux 原子 no-clobber 方式发布官方 reproducer。
+预算停止只有在 final 3/3 已完成且发布成功时才能返回 verified 状态。
+
 P1 会重复执行用户提供的命令，因此只适用于用户信任的本地代码与命令。它不承诺
 通用仓库隔离、最小化全局最优解或任意命令的安全执行。
 
@@ -88,10 +98,10 @@ P1 会重复执行用户提供的命令，因此只适用于用户信任的本�
 | P4 | Probe telemetry（已完成）；dependency-aware ordering 保持为实验性工作，不进入当前主线 |
 | P5.1 | 通用只读导入分析与候选报告（已完成） |
 | P5.2a/b | 目标 pytest 入口感知的只读候选分析（已完成） |
-| P5.2c | 有界批量 import candidate 的 execution-verified 验证（当前） |
-| P5.3a | Import Pruning 与 Greedy 的同 workspace 组合验证（当前） |
-| P5.3b | 通用粗粒度预缩减与流水线扩展（后续） |
-| P6 | 有预算的 Fast Mode 与交付闭环（后续） |
+| P5.2c | 有界批量 import candidate 的 execution-verified 验证（已完成） |
+| P5.3a | Import Pruning 与 Greedy 的同 workspace 组合验证（已完成） |
+| P5.3b | 通用粗粒度预缩减与流水线扩展（已完成） |
+| P6 | 有预算的 Fast Mode、verified publishing 与 CLI 交付（当前） |
 
 ## 明确不做
 
