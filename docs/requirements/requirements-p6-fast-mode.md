@@ -2,9 +2,11 @@
 
 ## Status
 
-Proposed. P6 is implemented in small, separately reviewable changes. P6a
-defines the execution-budget contract only; it does not change a reducer's
-candidate ordering or acceptance rule.
+P6 is implemented in small, separately reviewable changes. P6a defines the
+execution-budget contract only; it does not change a reducer's candidate
+ordering or acceptance rule. P6b makes existing reduction probes transactional
+at a shared budget boundary. P6c provides staging verification and verified
+publication as an internal API; the explicit CLI entry point remains P6d.
 
 ## Objective
 
@@ -87,8 +89,15 @@ the budget into Import, Coarse, Greedy, CLI, staging, or publication.
   retains them. A stopped stage may retain only edits or deletions already
   accepted by its strict probe Oracle. This establishes a safe workspace, not
   a publishable reproducer.
-- P6c: staging, independent 3/3 verification, atomic publishing, and terminal
-  results.
+- P6c: `verify_and_publish` copies the accepted workspace to a sibling staging
+  directory, runs three independent budgeted checks there, and atomically
+  renames it into a new output directory only when all checks preserve the
+  baseline and the source digest remains unchanged. On Linux, publication uses
+  `renameat2(RENAME_NOREPLACE)` so a concurrently created destination is never
+  replaced. Platforms or filesystems without that no-clobber guarantee fail
+  with `runtime_error`; they do not fall back to ordinary `rename`. It returns
+  a structured terminal result and removes every unpublished staging directory.
+  It does not add a CLI entry point.
 - P6d: explicit CLI integration, reporting, and end-to-end tests.
 
 ## Non-goals
