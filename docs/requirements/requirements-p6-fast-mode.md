@@ -81,7 +81,12 @@ the budget into Import, Coarse, Greedy, CLI, staging, or publication.
 ## Later P6 slices
 
 - P6b: make Import, Coarse, and Greedy cooperative and transactional at a
-  Fast-Mode budget boundary.
+  Fast-Mode budget boundary. Each stage shares the same budget, does not repeat
+  a baseline, and stops before a new probe when only final slots remain. A
+  budgeted composition skips its normal stage-final checks; direct reducer use
+  retains them. A stopped stage may retain only edits or deletions already
+  accepted by its strict probe Oracle. This establishes a safe workspace, not
+  a publishable reproducer.
 - P6c: staging, independent 3/3 verification, atomic publishing, and terminal
   results.
 - P6d: explicit CLI integration, reporting, and end-to-end tests.

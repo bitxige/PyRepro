@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from pyrepro.reproducer.budget import ExecutionBudget
 from pyrepro.reproducer.coarse_reducer import CoarseFileReducer
 from pyrepro.reproducer.failure import (
     FailureMatchMode,
@@ -184,6 +185,82 @@ def test_rejected_import_batches_leave_original_workspace_for_coarse(tmp_path: P
             "ModuleNotFoundError",
         }
         assert result.file_reduction.baseline_runs == 0
+
+
+def test_budgeted_pipeline_keeps_an_accepted_import_when_search_stops(
+    tmp_path: Path,
+):
+    """A shared budget preserves accepted preprocessing before greedy stops."""
+    _project(tmp_path, None)
+    digest = tree_digest(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+    budget = ExecutionBudget(7)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = PreprocessingFirstReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            max_import_probes=4,
+            max_coarse_probes=1,
+        ).reduce(workspace, budget=budget)
+
+        assert result.import_pruning.baseline_runs == 3
+        assert result.import_pruning.accepted_probes == 1
+        assert result.coarse_reduction is not None
+        assert result.coarse_reduction.budget_exhausted
+        assert result.file_reduction.budget_exhausted
+        assert result.budget_exhausted
+        assert result.executions == budget.snapshot().executions_started == 4
+        assert "from ballast import Unneeded" not in (
+            workspace.root / "tests/test_target.py"
+        ).read_text(encoding="utf-8")
+
+    assert tree_digest(tmp_path) == digest
+
+
+def test_six_execution_budget_starts_no_search_probe(tmp_path: Path):
+    """Baseline consumes the only non-final slots in the minimum budget."""
+    _project(tmp_path, None)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+    budget = ExecutionBudget(6)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = PreprocessingFirstReducer(
+            runner, "tests/test_target.py::test_failure", max_import_probes=4
+        ).reduce(workspace, budget=budget)
+
+        assert result.executions == budget.snapshot().executions_started == 3
+        assert result.import_pruning.candidate_attempts == 0
+        assert result.file_reduction.candidate_attempts == 0
+        assert result.budget_exhausted
+        assert "from ballast import Unneeded" in (
+            workspace.root / "tests/test_target.py"
+        ).read_text(encoding="utf-8")
+
+
+def test_coarse_stops_before_split_when_global_budget_is_exhausted(tmp_path: Path):
+    """A rejected group cannot consume extra split probes after its last slot."""
+    _nested_project(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+    budget = ExecutionBudget(7)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        pruning = BatchImportPruner(
+            runner, "tests/test_target.py::test_failure", max_probes=2
+        ).prune(workspace, budget=budget, verify_final=False)
+        coarse = CoarseFileReducer(runner, max_probes=12).reduce(
+            workspace,
+            pruning.baseline_signature,
+            FailureMatchMode.STRICT,
+            pytest_node="tests/test_target.py::test_failure",
+            budget=budget,
+        )
+
+        assert coarse.candidate_attempts == 1
+        assert coarse.budget_exhausted
+        assert coarse.probe_records[0].phase == "coarse_group"
+        assert all(record.phase != "coarse_split" for record in coarse.probe_records)
+        assert (workspace.root / "package/required.py").is_file()
 
 
 def _project(root: Path, source_prefix: Path | None) -> None:

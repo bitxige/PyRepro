@@ -132,6 +132,12 @@ class ExecutionBudget:
         """Return whether one reserved final-verification command can start."""
         return self._start_reason(OracleExecutionKind.FINAL_VERIFICATION) is None
 
+    def ensure_can_start(self, kind: OracleExecutionKind) -> None:
+        """Raise a structured stop before a caller mutates a probe workspace."""
+        reason = self._start_reason(kind)
+        if reason is not None:
+            raise BudgetExhaustedError(reason)
+
     def run_oracle(
         self,
         runner: CommandRunner,
@@ -144,9 +150,7 @@ class ExecutionBudget:
         The count is consumed immediately before invoking the runner, so a
         command that times out or otherwise fails still consumes one execution.
         """
-        reason = self._start_reason(kind)
-        if reason is not None:
-            raise BudgetExhaustedError(reason)
+        self.ensure_can_start(kind)
         effective_timeout = self._effective_timeout(runner.timeout_seconds)
         if effective_timeout <= 0:
             raise BudgetExhaustedError(BudgetStopReason.TIME_LIMIT)
