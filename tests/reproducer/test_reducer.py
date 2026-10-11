@@ -5,7 +5,13 @@ import sys
 from pathlib import Path
 
 import pytest
+from pyrepro.reproducer.budget import (
+    BudgetExhaustedError,
+    BudgetStopReason,
+    OracleExecutionKind,
+)
 from pyrepro.reproducer.failure import (
+    FailureMatchMode,
     FailureSignature,
     ReductionOutcome,
     classify_result,
@@ -89,6 +95,43 @@ def test_reducer_rejects_an_unstable_three_run_baseline(tmp_path: Path):
 
         with pytest.raises(UnstableBaselineError, match="unstable"):
             reducer.reduce(workspace)
+
+
+@pytest.mark.parametrize(
+    "stop_error",
+    (
+        BudgetExhaustedError(BudgetStopReason.TIME_LIMIT),
+        OSError("simulated runner failure"),
+    ),
+    ids=("budget", "runner-error"),
+)
+def test_greedy_restores_a_file_when_probe_execution_stops(
+    tmp_path: Path, stop_error: Exception
+):
+    """A stopped probe cannot leave an unaccepted deletion in the workspace."""
+    runner = CommandRunner((sys.executable, "reproduce.py"), timeout_seconds=2)
+
+    with ReductionWorkspace(FAILING_PROJECT) as workspace:
+        baseline = FailureSignature.from_result(
+            runner.run(workspace.root), workspace.root
+        )
+        assert baseline is not None
+        candidate = workspace.root / "app/model.py"
+        original = candidate.read_bytes()
+        backup_root = tmp_path / "backups"
+        reducer = GreedyFileReducer(runner)
+
+        with pytest.raises(type(stop_error)):
+            reducer._try_remove(
+                workspace.root,
+                candidate,
+                backup_root,
+                baseline,
+                FailureMatchMode.STRICT,
+                _StopAtProbeBudget(stop_error),
+            )
+
+        assert candidate.read_bytes() == original
 
 
 def test_reducer_skips_project_data_directories_and_honors_expectation(
@@ -397,3 +440,26 @@ class _UnstableRunner:
 KeyError: 'width'
 """
         return ExecutionResult(("python", "reproduce.py"), 1, "", stderr, False)
+
+
+class _StopAtProbeBudget:
+    """Model a stop that occurs only after greedy has prepared its probe."""
+
+    def ensure_can_start(self, kind: OracleExecutionKind) -> None:
+        """Permit the test's pre-mutation budget check."""
+        del kind
+
+    def run_oracle(
+        self,
+        runner: CommandRunner,
+        working_directory: Path,
+        *,
+        kind: OracleExecutionKind,
+    ) -> ExecutionResult:
+        """Stop at the shared Oracle boundary without executing a command."""
+        del runner, working_directory, kind
+        raise self.error
+
+    def __init__(self, error: Exception) -> None:
+        """Store the controlled failure raised at the Oracle boundary."""
+        self.error = error

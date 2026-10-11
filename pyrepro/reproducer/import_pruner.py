@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 
+from pyrepro.reproducer.budget import (
+    BudgetExhaustedError,
+    ExecutionBudget,
+    OracleExecutionKind,
+)
 from pyrepro.reproducer.failure import (
     FailureMatchMode,
     FailureSignature,
@@ -21,6 +26,7 @@ from pyrepro.reproducer.reducer import (
     _establish_baseline,
     _python_files,
     _python_line_count,
+    _run_oracle,
     _verify_final_workspace,
 )
 from pyrepro.reproducer.runner import CommandRunner
@@ -46,6 +52,7 @@ class ImportPruningResult:
     wall_clock_seconds: float
     probe_records: tuple[ProbeRecord, ...]
     source_unchanged: bool
+    budget_exhausted: bool = False
 
 
 @dataclass(frozen=True)
@@ -106,6 +113,9 @@ class BatchImportPruner:
         self,
         workspace: ReductionWorkspace,
         baseline_signature: FailureSignature | None = None,
+        *,
+        budget: ExecutionBudget | None = None,
+        verify_final: bool = True,
     ) -> ImportPruningResult:
         """Run bounded probes and final verification in a workspace.
 
@@ -113,6 +123,9 @@ class BatchImportPruner:
             workspace: Active disposable workspace to edit.
             baseline_signature: Existing stable signature from an earlier
                 composed stage. When omitted, establishes the normal baseline.
+            budget: Optional shared Fast-Mode Oracle budget.
+            verify_final: Whether to run the normal single-run stage check.
+                Fast Mode defers this to its independent final verification.
         """
         started = perf_counter()
         if baseline_signature is None:
@@ -122,6 +135,7 @@ class BatchImportPruner:
                 self.baseline_runs,
                 self.expected_text,
                 self.match_mode,
+                budget,
             )
             baseline_runs = self.baseline_runs
         else:
@@ -133,6 +147,7 @@ class BatchImportPruner:
         initial_lines = _line_count(workspace.root)
         records: list[ProbeRecord] = []
         accepted = rejected = 0
+        budget_exhausted = False
         low_risk = tuple(
             operation
             for operation in operations
@@ -140,23 +155,40 @@ class BatchImportPruner:
         )
         risk_marked = tuple(op for op in operations if op not in low_risk)
         for batch in (low_risk, risk_marked):
-            if batch and len(records) < self.max_probes:
-                new_records, new_accepted, new_rejected = self._search(
-                    workspace.root, batch, baseline, self.max_probes - len(records)
-                )
-                records.extend(new_records)
-                accepted += new_accepted
-                rejected += new_rejected
+            if not batch or len(records) >= self.max_probes:
+                continue
+            if budget is not None and not budget.can_start_probe():
+                budget_exhausted = True
+                break
+            new_records, new_accepted, new_rejected, stopped = self._search(
+                workspace.root,
+                batch,
+                baseline,
+                self.max_probes - len(records),
+                budget,
+            )
+            records.extend(new_records)
+            accepted += new_accepted
+            rejected += new_rejected
+            if stopped:
+                budget_exhausted = True
+                break
         executions += len(records)
-        if (
-            _verify_final_workspace(
-                self.runner, workspace.root, baseline, self.match_mode
-            )
-            is not ReductionOutcome.SAME_FAILURE
-        ):
-            raise UnstableBaselineError(
-                "final import-pruning verification did not match baseline"
-            )
+        if verify_final and not budget_exhausted:
+            if (
+                _verify_final_workspace(
+                    self.runner,
+                    workspace.root,
+                    baseline,
+                    self.match_mode,
+                    budget,
+                )
+                is not ReductionOutcome.SAME_FAILURE
+            ):
+                raise UnstableBaselineError(
+                    "final import-pruning verification did not match baseline"
+                )
+            executions += 1
         return ImportPruningResult(
             baseline_signature=baseline,
             baseline_runs=baseline_runs,
@@ -166,12 +198,13 @@ class BatchImportPruner:
             candidate_attempts=len(records),
             accepted_probes=accepted,
             rejected_probes=rejected,
-            executions=executions + 1,
+            executions=executions,
             initial_python_lines=initial_lines,
             remaining_python_lines=_line_count(workspace.root),
             wall_clock_seconds=perf_counter() - started,
             probe_records=tuple(records),
             source_unchanged=workspace.source_is_unchanged(),
+            budget_exhausted=budget_exhausted,
         )
 
     def _search(
@@ -180,69 +213,94 @@ class BatchImportPruner:
         operations: tuple[_Operation, ...],
         baseline: FailureSignature,
         budget: int,
-    ) -> tuple[list[ProbeRecord], int, int]:
+        execution_budget: ExecutionBudget | None,
+    ) -> tuple[list[ProbeRecord], int, int, bool]:
         """Try one batch, then split rejected batches while budget remains."""
         if not operations or budget <= 0:
-            return [], 0, 0
-        record, accepted = self._probe(root, operations, baseline)
+            return [], 0, 0, False
+        try:
+            record, accepted = self._probe(root, operations, baseline, execution_budget)
+        except BudgetExhaustedError:
+            return [], 0, 0, True
         records = [record]
         if accepted:
-            return records, 1, 0
+            return records, 1, 0, False
         if len(operations) == 1 or budget == 1:
-            return records, 0, 1
+            return records, 0, 1, False
         split = len(operations) // 2
-        left, left_yes, left_no = self._search(
-            root, operations[:split], baseline, budget - 1
+        left, left_yes, left_no, left_stopped = self._search(
+            root, operations[:split], baseline, budget - 1, execution_budget
         )
         records.extend(left)
+        if left_stopped:
+            return records, left_yes, left_no + 1, True
         if len(records) < budget:
-            right, right_yes, right_no = self._search(
-                root, operations[split:], baseline, budget - len(records)
+            right, right_yes, right_no, right_stopped = self._search(
+                root,
+                operations[split:],
+                baseline,
+                budget - len(records),
+                execution_budget,
             )
             records.extend(right)
         else:
             right_yes = right_no = 0
-        return records, left_yes + right_yes, left_no + right_no + 1
+            right_stopped = False
+        return records, left_yes + right_yes, left_no + right_no + 1, right_stopped
 
     def _probe(
         self,
         root: Path,
         operations: tuple[_Operation, ...],
         baseline: FailureSignature,
+        budget: ExecutionBudget | None,
     ) -> tuple[ProbeRecord, bool]:
+        if budget is not None:
+            budget.ensure_can_start(OracleExecutionKind.PROBE)
         originals = _apply(root, operations)
-        started = perf_counter()
-        execution = self.runner.run(root)
-        duration = perf_counter() - started
-        outcome = classify_result(execution, baseline, root, self.match_mode)
-        proposed_lines = _line_count(root)
-        accepted = outcome is ReductionOutcome.SAME_FAILURE
-        if not accepted:
-            _restore(root, originals)
-        details = exception_details(execution)
-        error_type, error_message = details or (None, None)
-        return (
-            ProbeRecord(
-                phase="import_pruning",
-                candidate_paths=tuple(
-                    sorted(
-                        {path for operation in operations for path in operation.paths}
-                    )
+        accepted = False
+        try:
+            started = perf_counter()
+            execution = _run_oracle(
+                self.runner, root, budget, OracleExecutionKind.PROBE
+            )
+            duration = perf_counter() - started
+            outcome = classify_result(execution, baseline, root, self.match_mode)
+            proposed_lines = _line_count(root)
+            accepted = outcome is ReductionOutcome.SAME_FAILURE
+            details = exception_details(execution)
+            error_type, error_message = details or (None, None)
+            return (
+                ProbeRecord(
+                    phase="import_pruning",
+                    candidate_paths=tuple(
+                        sorted(
+                            {
+                                path
+                                for operation in operations
+                                for path in operation.paths
+                            }
+                        )
+                    ),
+                    candidate_descriptions=tuple(
+                        item
+                        for operation in operations
+                        for item in operation.descriptions
+                    ),
+                    outcome=outcome,
+                    accepted=accepted,
+                    duration_seconds=duration,
+                    return_code=execution.return_code,
+                    exception_type=error_type,
+                    exception_message=error_message,
+                    failure_signature=FailureSignature.from_result(execution, root),
+                    candidate_python_lines=proposed_lines,
                 ),
-                candidate_descriptions=tuple(
-                    item for operation in operations for item in operation.descriptions
-                ),
-                outcome=outcome,
-                accepted=accepted,
-                duration_seconds=duration,
-                return_code=execution.return_code,
-                exception_type=error_type,
-                exception_message=error_message,
-                failure_signature=FailureSignature.from_result(execution, root),
-                candidate_python_lines=proposed_lines,
-            ),
-            accepted,
-        )
+                accepted,
+            )
+        finally:
+            if not accepted:
+                _restore(root, originals)
 
 
 def _build_operations(

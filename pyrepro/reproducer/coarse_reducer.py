@@ -9,6 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 
+from pyrepro.reproducer.budget import (
+    BudgetExhaustedError,
+    ExecutionBudget,
+    OracleExecutionKind,
+)
 from pyrepro.reproducer.failure import (
     FailureMatchMode,
     FailureSignature,
@@ -37,6 +42,7 @@ class CoarseReductionResult:
     remaining_python_lines: int
     wall_clock_seconds: float
     probe_records: tuple[ProbeRecord, ...]
+    budget_exhausted: bool = False
 
 
 class CoarseFileReducer:
@@ -55,6 +61,8 @@ class CoarseFileReducer:
         baseline: FailureSignature,
         match_mode: FailureMatchMode,
         pytest_node: str | None = None,
+        *,
+        budget: ExecutionBudget | None = None,
     ) -> CoarseReductionResult:
         """Delete accepted directory groups without re-establishing a baseline."""
         started = perf_counter()
@@ -65,17 +73,25 @@ class CoarseFileReducer:
         queue = deque(_top_level_groups(candidates, workspace.root))
         records: list[ProbeRecord] = []
         accepted = 0
+        budget_exhausted = False
         seen: set[frozenset[Path]] = set()
         while queue and len(records) < self.max_probes:
+            if budget is not None and not budget.can_start_probe():
+                budget_exhausted = True
+                break
             group, split = queue.popleft()
             active = tuple(path for path in group if path.exists())
             key = frozenset(active)
             if not active or key in seen:
                 continue
             seen.add(key)
-            record, same = self._probe(
-                workspace.root, active, baseline, match_mode, split
-            )
+            try:
+                record, same = self._probe(
+                    workspace.root, active, baseline, match_mode, split, budget
+                )
+            except BudgetExhaustedError:
+                budget_exhausted = True
+                break
             records.append(record)
             if same:
                 for path in active:
@@ -94,6 +110,7 @@ class CoarseFileReducer:
             ),
             wall_clock_seconds=perf_counter() - started,
             probe_records=tuple(records),
+            budget_exhausted=budget_exhausted,
         )
 
     def _probe(
@@ -103,7 +120,10 @@ class CoarseFileReducer:
         baseline: FailureSignature,
         match_mode: FailureMatchMode,
         split: bool,
+        budget: ExecutionBudget | None,
     ) -> tuple[ProbeRecord, bool]:
+        if budget is not None:
+            budget.ensure_can_start(OracleExecutionKind.PROBE)
         with tempfile.TemporaryDirectory(prefix="pyrepro-coarse-probe-") as name:
             probe_root = Path(name) / "project"
             shutil.copytree(root, probe_root)
@@ -111,7 +131,12 @@ class CoarseFileReducer:
             for path in relative:
                 (probe_root / path).unlink()
             started = perf_counter()
-            result = self.runner.run(probe_root)
+            if budget is None:
+                result = self.runner.run(probe_root)
+            else:
+                result = budget.run_oracle(
+                    self.runner, probe_root, kind=OracleExecutionKind.PROBE
+                )
             duration = perf_counter() - started
             outcome = classify_result(result, baseline, probe_root, match_mode)
             from pyrepro.reproducer.reducer import _probe_record

@@ -5,8 +5,13 @@ import sys
 from pathlib import Path
 
 from pyrepro.reproducer.__main__ import main
+from pyrepro.reproducer.budget import (
+    BudgetExhaustedError,
+    BudgetStopReason,
+    OracleExecutionKind,
+)
 from pyrepro.reproducer.import_pruner import BatchImportPruner
-from pyrepro.reproducer.runner import CommandRunner
+from pyrepro.reproducer.runner import CommandRunner, ExecutionResult
 from pyrepro.reproducer.workspace import ReductionWorkspace, tree_digest
 
 
@@ -61,6 +66,26 @@ def test_rejected_batch_restores_every_file_before_bounded_split(tmp_path: Path)
         assert result.source_unchanged
 
     assert tree_digest(tmp_path) == digest
+
+
+def test_budget_stop_during_an_import_probe_restores_unaccepted_edits(tmp_path: Path):
+    """A deadline race after source edits cannot leak an unaccepted batch."""
+    _project(tmp_path, "raise ValueError('target failure')")
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = BatchImportPruner(
+            runner, "tests/test_target.py::test_failure", max_probes=4
+        ).prune(workspace, budget=_StopDuringProbeBudget(), verify_final=False)
+
+        assert result.budget_exhausted
+        assert result.candidate_attempts == 0
+        assert "Ballast" in (workspace.root / "tests/test_target.py").read_text(
+            encoding="utf-8"
+        )
+        assert "Ballast" in (workspace.root / "pkg/__init__.py").read_text(
+            encoding="utf-8"
+        )
 
 
 def test_cli_writes_verified_pruned_project_and_import_probe_jsonl(
@@ -136,3 +161,27 @@ def _write(root: Path, relative_path: str, content: str) -> None:
     path = root / relative_path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+class _StopDuringProbeBudget:
+    """Model a deadline that expires between a probe precheck and its launch."""
+
+    def can_start_probe(self) -> bool:
+        """Permit the outer stage loop to reach the probe mutation."""
+        return True
+
+    def ensure_can_start(self, kind: OracleExecutionKind) -> None:
+        """Permit the pre-mutation check in this controlled race."""
+        del kind
+
+    def run_oracle(
+        self,
+        runner: CommandRunner,
+        working_directory: Path,
+        *,
+        kind: OracleExecutionKind,
+    ) -> ExecutionResult:
+        """Stop exactly at the Oracle launch boundary."""
+        if kind is OracleExecutionKind.BASELINE:
+            return runner.run(working_directory)
+        raise BudgetExhaustedError(BudgetStopReason.TIME_LIMIT)

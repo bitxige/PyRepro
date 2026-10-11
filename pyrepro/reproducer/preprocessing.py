@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from time import perf_counter
 
+from pyrepro.reproducer.budget import ExecutionBudget
 from pyrepro.reproducer.coarse_reducer import CoarseFileReducer, CoarseReductionResult
 from pyrepro.reproducer.failure import FailureMatchMode
 from pyrepro.reproducer.import_pruner import BatchImportPruner, ImportPruningResult
@@ -24,6 +25,7 @@ class PreprocessingReductionResult:
     wall_clock_seconds: float
     probe_records: tuple[ProbeRecord, ...]
     source_unchanged: bool
+    budget_exhausted: bool = False
 
 
 class PreprocessingFirstReducer:
@@ -63,8 +65,13 @@ class PreprocessingFirstReducer:
         self.max_import_probes = max_import_probes
         self.max_coarse_probes = max_coarse_probes
 
-    def reduce(self, workspace: ReductionWorkspace) -> PreprocessingReductionResult:
-        """Verify preprocessing, then run greedy reduction without rebasing."""
+    def reduce(
+        self,
+        workspace: ReductionWorkspace,
+        *,
+        budget: ExecutionBudget | None = None,
+    ) -> PreprocessingReductionResult:
+        """Run composed stages with one baseline and optional shared budget."""
         started = perf_counter()
         import_result = BatchImportPruner(
             self.runner,
@@ -72,7 +79,7 @@ class PreprocessingFirstReducer:
             expected_text=self.expected_text,
             match_mode=self.match_mode,
             max_probes=self.max_import_probes,
-        ).prune(workspace)
+        ).prune(workspace, budget=budget, verify_final=budget is None)
         coarse_result = None
         if self.max_coarse_probes:
             coarse_result = CoarseFileReducer(
@@ -82,12 +89,18 @@ class PreprocessingFirstReducer:
                 import_result.baseline_signature,
                 self.match_mode,
                 self.pytest_node,
+                budget=budget,
             )
         file_result = GreedyFileReducer(
             self.runner,
             expected_text=self.expected_text,
             match_mode=self.match_mode,
-        ).reduce(workspace, import_result.baseline_signature)
+        ).reduce(
+            workspace,
+            import_result.baseline_signature,
+            budget=budget,
+            verify_final=budget is None,
+        )
         return PreprocessingReductionResult(
             import_pruning=import_result,
             coarse_reduction=coarse_result,
@@ -105,5 +118,10 @@ class PreprocessingFirstReducer:
             ),
             source_unchanged=(
                 import_result.source_unchanged and file_result.source_unchanged
+            ),
+            budget_exhausted=(
+                import_result.budget_exhausted
+                or (coarse_result is not None and coarse_result.budget_exhausted)
+                or file_result.budget_exhausted
             ),
         )

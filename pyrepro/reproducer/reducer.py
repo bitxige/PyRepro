@@ -10,6 +10,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from time import perf_counter
 
+from pyrepro.reproducer.budget import (
+    BudgetExhaustedError,
+    ExecutionBudget,
+    OracleExecutionKind,
+)
 from pyrepro.reproducer.failure import (
     FailureMatchMode,
     FailureSignature,
@@ -160,6 +165,7 @@ class ReductionResult:
     probes: tuple[ProbeDecision, ...]
     probe_records: tuple[ProbeRecord, ...]
     source_unchanged: bool
+    budget_exhausted: bool = False
 
 
 class GreedyFileReducer:
@@ -196,6 +202,9 @@ class GreedyFileReducer:
         self,
         workspace: ReductionWorkspace,
         baseline_signature: FailureSignature | None = None,
+        *,
+        budget: ExecutionBudget | None = None,
+        verify_final: bool = True,
     ) -> ReductionResult:
         """Run greedy file reduction in an active disposable workspace.
 
@@ -204,6 +213,9 @@ class GreedyFileReducer:
             baseline_signature: Already-verified failure signature to reuse for
                 a composed reduction stage. When omitted, this reducer
                 establishes its normal three-run baseline.
+            budget: Optional shared Fast-Mode Oracle budget.
+            verify_final: Whether to run the normal single-run stage check.
+                Fast Mode defers this to its independent final verification.
 
         Returns:
             Verified greedy reduction result.
@@ -219,6 +231,7 @@ class GreedyFileReducer:
                 self.baseline_runs,
                 self.expected_text,
                 self.match_mode,
+                budget,
             )
             baseline_runs = self.baseline_runs
         else:
@@ -231,18 +244,27 @@ class GreedyFileReducer:
         probe_records: list[ProbeRecord] = []
         accepted_probes = 0
         retained_lines = initial_lines
+        budget_exhausted = False
 
         with tempfile.TemporaryDirectory(prefix="pyrepro-reducer-backups-") as name:
             backup_root = Path(name)
             for candidate in candidates:
+                if budget is not None and not budget.can_start_probe():
+                    budget_exhausted = True
+                    break
                 candidate_lines = _physical_line_count(candidate.read_bytes())
-                decision, probe_record, candidate_executions = self._try_remove(
-                    workspace.root,
-                    candidate,
-                    backup_root,
-                    baseline_signature,
-                    self.match_mode,
-                )
+                try:
+                    decision, probe_record, candidate_executions = self._try_remove(
+                        workspace.root,
+                        candidate,
+                        backup_root,
+                        baseline_signature,
+                        self.match_mode,
+                        budget,
+                    )
+                except BudgetExhaustedError:
+                    budget_exhausted = True
+                    break
                 decisions.append(decision)
                 proposed_lines = retained_lines - candidate_lines
                 probe_records.append(
@@ -261,14 +283,19 @@ class GreedyFileReducer:
                     )
                 )
 
-        final_outcome = _verify_final_workspace(
-            self.runner, workspace.root, baseline_signature, self.match_mode
-        )
-        executions += 1
-        if final_outcome is not ReductionOutcome.SAME_FAILURE:
-            raise UnstableBaselineError(
-                "final reduction verification did not match baseline"
+        if verify_final and not budget_exhausted:
+            final_outcome = _verify_final_workspace(
+                self.runner,
+                workspace.root,
+                baseline_signature,
+                self.match_mode,
+                budget,
             )
+            executions += 1
+            if final_outcome is not ReductionOutcome.SAME_FAILURE:
+                raise UnstableBaselineError(
+                    "final reduction verification did not match baseline"
+                )
         remaining = _python_files(workspace.root, self.ignored_directory_names)
 
         return ReductionResult(
@@ -290,6 +317,7 @@ class GreedyFileReducer:
             probes=tuple(probes),
             probe_records=tuple(probe_records),
             source_unchanged=workspace.source_is_unchanged(),
+            budget_exhausted=budget_exhausted,
         )
 
     def _try_remove(
@@ -299,35 +327,42 @@ class GreedyFileReducer:
         backup_root: Path,
         baseline_signature: FailureSignature,
         match_mode: FailureMatchMode,
+        budget: ExecutionBudget | None = None,
     ) -> tuple[FileDecision, ProbeRecord, int]:
         relative = candidate.relative_to(workspace_root)
         backup = backup_root / relative
         backup.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(candidate, backup)
+        if budget is not None:
+            budget.ensure_can_start(OracleExecutionKind.PROBE)
         candidate.unlink()
-
-        started_at = perf_counter()
-        result = self.runner.run(workspace_root)
-        duration_seconds = perf_counter() - started_at
-        outcome = classify_result(
-            result, baseline_signature, workspace_root, match_mode
-        )
-        removed = outcome is ReductionOutcome.SAME_FAILURE
-        if not removed:
-            shutil.copy2(backup, candidate)
-        return (
-            FileDecision(relative.as_posix(), outcome, removed),
-            _probe_record(
-                "greedy",
-                (relative,),
-                result,
-                outcome,
-                removed,
-                duration_seconds,
-                workspace_root,
-            ),
-            1,
-        )
+        removed = False
+        try:
+            started_at = perf_counter()
+            result = _run_oracle(
+                self.runner, workspace_root, budget, OracleExecutionKind.PROBE
+            )
+            duration_seconds = perf_counter() - started_at
+            outcome = classify_result(
+                result, baseline_signature, workspace_root, match_mode
+            )
+            removed = outcome is ReductionOutcome.SAME_FAILURE
+            return (
+                FileDecision(relative.as_posix(), outcome, removed),
+                _probe_record(
+                    "greedy",
+                    (relative,),
+                    result,
+                    outcome,
+                    removed,
+                    duration_seconds,
+                    workspace_root,
+                ),
+                1,
+            )
+        finally:
+            if not removed and not candidate.exists():
+                shutil.copy2(backup, candidate)
 
 
 class DdminFileReducer:
@@ -699,10 +734,13 @@ def _establish_baseline(
     baseline_runs: int,
     expected_text: str | None,
     match_mode: FailureMatchMode = FailureMatchMode.STRICT,
+    budget: ExecutionBudget | None = None,
 ) -> tuple[FailureSignature, int]:
     signatures: list[FailureSignature] = []
     for _ in range(baseline_runs):
-        result = runner.run(workspace_root)
+        result = _run_oracle(
+            runner, workspace_root, budget, OracleExecutionKind.BASELINE
+        )
         signature = FailureSignature.from_result(result, workspace_root)
         if signature is None:
             raise UnstableBaselineError("baseline is not an uncaught Python failure")
@@ -725,9 +763,24 @@ def _verify_final_workspace(
     workspace_root: Path,
     baseline_signature: FailureSignature,
     match_mode: FailureMatchMode = FailureMatchMode.STRICT,
+    budget: ExecutionBudget | None = None,
 ) -> ReductionOutcome:
-    result = runner.run(workspace_root)
+    result = _run_oracle(
+        runner, workspace_root, budget, OracleExecutionKind.FINAL_VERIFICATION
+    )
     return classify_result(result, baseline_signature, workspace_root, match_mode)
+
+
+def _run_oracle(
+    runner: CommandRunner,
+    workspace_root: Path,
+    budget: ExecutionBudget | None,
+    kind: OracleExecutionKind,
+) -> ExecutionResult:
+    """Run one Oracle command through an optional shared Fast-Mode budget."""
+    if budget is None:
+        return runner.run(workspace_root)
+    return budget.run_oracle(runner, workspace_root, kind=kind)
 
 
 def _signatures_match(
