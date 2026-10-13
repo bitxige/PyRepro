@@ -121,7 +121,8 @@ same module do not. Static `__all__` candidates include a companion line for a
 later consistent edit. Candidates carrying `side_effect_risk` remain proposals
 only and require execution validation.
 
-`prune-imports` is the narrow P5.2c validation stage. It uses that explicit
+`prune-imports` is the narrow P5.2c validation stage. The unreleased P7 work
+extends its supported source shapes. It uses that explicit
 pytest node only for syntax-level target scope; its supplied argv remains the
 actual trusted reproduction command. The pruner establishes the existing
 three-run failure baseline in a disposable workspace, constructs only
@@ -130,13 +131,16 @@ in bounded batches. A failed batch is restored completely before a bounded
 bisection attempt. A static `__all__` companion is updated in the same atomic
 operation as its matching re-export. Ordinary and `side_effect_risk` candidates
 are processed in separate batches. Static analysis only proposes edits: the
-existing failure oracle remains the sole acceptance authority.
+existing failure oracle remains the sole acceptance authority. P7 additionally
+supports a deliberately narrow parenthesized multiline form with one static
+literal list or tuple `__all__`; each probe reparses current workspace source,
+and annotated or multiple-target `__all__` assignments remain unsupported.
 
-Complex or multiline import statements, inline comments, semicolon chaining,
-wildcard imports, dynamic imports, and dynamic or complex `__all__` constructs
-are skipped rather than broadly rewriting module source. This operation does
-not run file, grouped, or symbol reduction; P5.3 remains responsible for
-composing verified preprocessing with repository reduction.
+Inline comments, semicolon chaining, wildcard imports, dynamic imports, and
+dynamic or complex `__all__` constructs are skipped rather than broadly
+rewriting module source. This operation does not run file, grouped, or symbol
+reduction; the preprocessing-first pipeline remains responsible for composing
+verified preprocessing with repository reduction.
 
 ### `reproducer.runner`
 

@@ -57,15 +57,18 @@ class ImportPruningResult:
 
 @dataclass(frozen=True)
 class _Edit:
+    """One UTF-8 byte-range replacement in a source file."""
+
     start: int
     end: int
-    replacement: str
+    replacement: bytes
 
 
 @dataclass(frozen=True)
 class _Operation:
+    """A candidate group whose concrete edits are rebuilt for every probe."""
+
     candidates: tuple[ImportCandidate, ...]
-    edits_by_path: tuple[tuple[str, tuple[_Edit, ...]], ...]
 
     @property
     def paths(self) -> tuple[str, ...]:
@@ -77,6 +80,17 @@ class _Operation:
             f"{candidate.path}:{candidate.line}:{candidate.bound_name}"
             for candidate in self.candidates
         )
+
+
+@dataclass(frozen=True)
+class _EditPlan:
+    """Non-overlapping current-workspace edits for one atomic probe."""
+
+    edits_by_path: tuple[tuple[str, tuple[_Edit, ...]], ...]
+
+
+class _EditPlanUnavailableError(Exception):
+    """Raised when current source no longer safely supports a planned probe."""
 
 
 class BatchImportPruner:
@@ -218,18 +232,48 @@ class BatchImportPruner:
         """Try one batch, then split rejected batches while budget remains."""
         if not operations or budget <= 0:
             return [], 0, 0, False
+        current_operations = tuple(
+            operation
+            for operation in operations
+            if _build_edit_plan(root, (operation,)) is not None
+        )
+        if not current_operations:
+            return [], 0, 0, False
+        if current_operations != operations:
+            return self._search(
+                root, current_operations, baseline, budget, execution_budget
+            )
         try:
-            record, accepted = self._probe(root, operations, baseline, execution_budget)
+            record, accepted = self._probe(
+                root, current_operations, baseline, execution_budget
+            )
         except BudgetExhaustedError:
             return [], 0, 0, True
+        except _EditPlanUnavailableError:
+            if len(current_operations) == 1:
+                return [], 0, 0, False
+            split = len(current_operations) // 2
+            left, left_yes, left_no, left_stopped = self._search(
+                root, current_operations[:split], baseline, budget, execution_budget
+            )
+            if left_stopped or len(left) >= budget:
+                return left, left_yes, left_no, left_stopped
+            right, right_yes, right_no, right_stopped = self._search(
+                root,
+                current_operations[split:],
+                baseline,
+                budget - len(left),
+                execution_budget,
+            )
+            return left + right, left_yes + right_yes, left_no + right_no, right_stopped
         records = [record]
         if accepted:
             return records, 1, 0, False
-        if len(operations) == 1 or budget == 1:
+        if len(current_operations) == 1 or budget == 1:
             return records, 0, 1, False
-        split = len(operations) // 2
+        split = len(current_operations) // 2
         left, left_yes, left_no, left_stopped = self._search(
-            root, operations[:split], baseline, budget - 1, execution_budget
+            root, current_operations[:split], baseline, budget - 1, execution_budget
         )
         records.extend(left)
         if left_stopped:
@@ -237,7 +281,7 @@ class BatchImportPruner:
         if len(records) < budget:
             right, right_yes, right_no, right_stopped = self._search(
                 root,
-                operations[split:],
+                current_operations[split:],
                 baseline,
                 budget - len(records),
                 execution_budget,
@@ -257,7 +301,10 @@ class BatchImportPruner:
     ) -> tuple[ProbeRecord, bool]:
         if budget is not None:
             budget.ensure_can_start(OracleExecutionKind.PROBE)
-        originals = _apply(root, operations)
+        plan = _build_edit_plan(root, operations)
+        if plan is None:
+            raise _EditPlanUnavailableError
+        originals = _apply(root, plan)
         accepted = False
         try:
             started = perf_counter()
@@ -306,59 +353,165 @@ class BatchImportPruner:
 def _build_operations(
     root: Path, candidates: tuple[ImportCandidate, ...]
 ) -> tuple[tuple[_Operation, ...], int]:
+    """Build initially safe operation identities without retaining source ranges."""
     grouped: dict[tuple[str, int], list[ImportCandidate]] = {}
     for candidate in candidates:
         grouped.setdefault((candidate.path, candidate.line), []).append(candidate)
     operations: list[_Operation] = []
     skipped = 0
     for (path, line), group in grouped.items():
-        operation = _operation(root, path, line, tuple(group))
-        if operation is None:
+        del path, line
+        operation = _Operation(tuple(group))
+        if _build_edit_plan(root, (operation,)) is None:
             skipped += len(group)
         else:
             operations.append(operation)
     return tuple(operations), skipped
 
 
-def _operation(
-    root: Path, path: str, line: int, candidates: tuple[ImportCandidate, ...]
-) -> _Operation | None:
-    source = (root / path).read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=path)
-    node = next(
-        (
-            item
-            for item in tree.body
-            if isinstance(item, ast.Import | ast.ImportFrom) and item.lineno == line
-        ),
-        None,
-    )
-    if node is None or node.end_lineno != node.lineno or not _safe_line(source, node):
+def _build_edit_plan(
+    root: Path, operations: tuple[_Operation, ...]
+) -> _EditPlan | None:
+    """Rebuild one non-overlapping byte-edit plan from current workspace text.
+
+    Candidate line numbers are discovery metadata only. Every probe reparses
+    current source and matches candidates by their stable binding identity so a
+    prior accepted edit cannot make a later probe use stale source ranges.
+    """
+    candidates_by_path: dict[str, list[ImportCandidate]] = {}
+    for operation in operations:
+        for candidate in operation.candidates:
+            candidates_by_path.setdefault(candidate.path, []).append(candidate)
+
+    planned: list[tuple[str, tuple[_Edit, ...]]] = []
+    for path, candidates in candidates_by_path.items():
+        source_path = root / path
+        try:
+            source_bytes = source_path.read_bytes()
+            source = source_bytes.decode("utf-8")
+            tree = ast.parse(source, filename=path)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            return None
+        edits = _plan_file_edits(source, source_bytes, tree, candidates)
+        if edits is None:
+            return None
+        planned.append((path, edits))
+    return _EditPlan(tuple(sorted(planned)))
+
+
+def _plan_file_edits(
+    source: str,
+    source_bytes: bytes,
+    tree: ast.Module,
+    candidates: list[ImportCandidate],
+) -> tuple[_Edit, ...] | None:
+    """Plan all import and shared-``__all__`` edits for one current source file."""
+    import_matches: dict[ast.Import | ast.ImportFrom, list[ImportCandidate]] = {}
+    for candidate in candidates:
+        matches = _matching_import_nodes(tree, candidate)
+        if len(matches) != 1:
+            return None
+        import_matches.setdefault(matches[0], []).append(candidate)
+
+    edits: list[_Edit] = []
+    removed_from_all: set[str] = set()
+    for node, node_candidates in import_matches.items():
+        if not _safe_statement(source, node):
+            return None
+        removed = {candidate.bound_name for candidate in node_candidates}
+        aliases = [
+            alias for alias in node.names if _bound_name(node, alias) not in removed
+        ]
+        if len(aliases) == len(node.names):
+            return None
+        start, end = _byte_range(source, node)
+        if not aliases:
+            end = _line_end(source_bytes, end)
+            replacement = b""
+        else:
+            replacement = _render_import(node, aliases).encode("utf-8")
+        edits.append(_Edit(start, end, replacement))
+        for candidate in node_candidates:
+            if candidate.all_line is not None:
+                removed_from_all.add(candidate.bound_name)
+
+    all_nodes = [node for node in tree.body if _is_all(node)]
+    if removed_from_all and (len(all_nodes) != 1 or _has_dynamic_all_mutation(tree)):
         return None
-    removed = {candidate.bound_name for candidate in candidates}
-    aliases = [
-        alias
-        for alias in node.names
-        if (alias.asname or alias.name.split(".")[0]) not in removed
-    ]
-    if len(aliases) == len(node.names):
-        return None
-    start, end = _range(source, node)
-    if not aliases:
-        end = _line_end(source, end)
-    edits = [_Edit(start, end, _render_import(node, aliases))]
-    all_candidates = [item for item in candidates if item.all_line is not None]
-    if all_candidates:
-        all_edit = _render_all_edit(source, tree, all_candidates)
+    if removed_from_all:
+        node = all_nodes[0]
+        if not _safe_statement(source, node):
+            return None
+        all_edit = _render_all_edit(source, node, removed_from_all)
         if all_edit is None:
             return None
         edits.append(all_edit)
-    return _Operation(candidates, ((path, tuple(edits)),))
+    if _has_overlapping_edits(edits):
+        return None
+    return tuple(edits)
 
 
-def _safe_line(source: str, node: ast.Import | ast.ImportFrom) -> bool:
-    line = source.splitlines(keepends=True)[node.lineno - 1]
-    return node.col_offset == 0 and "#" not in line and ";" not in line
+def _matching_import_nodes(
+    tree: ast.Module, candidate: ImportCandidate
+) -> list[ast.Import | ast.ImportFrom]:
+    """Return current top-level imports uniquely matching one candidate binding."""
+    matches: list[ast.Import | ast.ImportFrom] = []
+    for node in tree.body:
+        if not isinstance(node, ast.Import | ast.ImportFrom):
+            continue
+        for alias in node.names:
+            if _bound_name(node, alias) != candidate.bound_name:
+                continue
+            if candidate.imported_name is not None:
+                if (
+                    not isinstance(node, ast.ImportFrom)
+                    or alias.name != candidate.imported_name
+                    or not _matches_from_import_context(node, candidate)
+                ):
+                    continue
+            elif (
+                not isinstance(node, ast.Import)
+                or alias.name != candidate.imported_module
+            ):
+                continue
+            matches.append(node)
+            break
+    return matches
+
+
+def _matches_from_import_context(
+    node: ast.ImportFrom, candidate: ImportCandidate
+) -> bool:
+    """Return whether a current from-import matches the candidate module.
+
+    Relative imports cannot be compared directly with the analyzer's resolved
+    module name. Their explicit module component must nevertheless match the
+    resolved suffix; unqualified relative imports are intentionally skipped
+    because they do not provide a stable enough context for source relocation.
+    """
+    if node.module is None:
+        return False
+    if node.level == 0:
+        return node.module == candidate.imported_module
+    return (
+        candidate.imported_module == node.module
+        or candidate.imported_module.endswith(f".{node.module}")
+    )
+
+
+def _bound_name(node: ast.Import | ast.ImportFrom, alias: ast.alias) -> str:
+    """Return the name introduced by one concrete import alias."""
+    if alias.asname is not None:
+        return alias.asname
+    return alias.name.split(".")[0] if isinstance(node, ast.Import) else alias.name
+
+
+def _safe_statement(source: str, node: ast.AST) -> bool:
+    """Reject source spans whose comments or semicolons would be discarded."""
+    lines = source.splitlines(keepends=True)[node.lineno - 1 : node.end_lineno]
+    return node.col_offset == 0 and all(
+        "#" not in line and ";" not in line for line in lines
+    )
 
 
 def _render_import(node: ast.Import | ast.ImportFrom, aliases: list[ast.alias]) -> str:
@@ -373,25 +526,8 @@ def _render_import(node: ast.Import | ast.ImportFrom, aliases: list[ast.alias]) 
     return f"from {'.' * node.level + (node.module or '')} import {names}"
 
 
-def _render_all_edit(
-    source: str, tree: ast.Module, candidates: list[ImportCandidate]
-) -> _Edit | None:
-    lines = {candidate.all_line for candidate in candidates}
-    if len(lines) != 1:
-        return None
-    line = next(iter(lines))
-    node = next(
-        (
-            item
-            for item in tree.body
-            if isinstance(item, ast.Assign | ast.AnnAssign)
-            and item.lineno == line
-            and _is_all(item)
-        ),
-        None,
-    )
-    if node is None or node.end_lineno != node.lineno:
-        return None
+def _render_all_edit(source: str, node: ast.Assign, removed: set[str]) -> _Edit | None:
+    """Render one literal static ``__all__`` update in UTF-8 byte offsets."""
     value = node.value
     if not isinstance(value, ast.List | ast.Tuple):
         return None
@@ -402,55 +538,126 @@ def _render_all_edit(
     ]
     if len(names) != len(value.elts):
         return None
-    removed = {candidate.bound_name for candidate in candidates}
+    retained_names = [name for name in names if name not in removed]
+    rendered_value: list[str] | tuple[str, ...]
+    if isinstance(value, ast.List):
+        rendered_value = retained_names
+    else:
+        rendered_value = tuple(retained_names)
     return _Edit(
-        *_range(source, node),
-        f"__all__ = {[name for name in names if name not in removed]!r}",
+        *_byte_range(source, node),
+        f"__all__ = {rendered_value!r}".encode(),
     )
 
 
-def _is_all(node: ast.Assign | ast.AnnAssign) -> bool:
-    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-    return any(
-        isinstance(target, ast.Name) and target.id == "__all__" for target in targets
-    )
+def _is_all(node: ast.stmt) -> bool:
+    """Return whether one supported statement safely assigns ``__all__``.
+
+    Annotated assignments would require preserving their annotation exactly.
+    Multiple targets would require preserving another binding. Both are outside
+    this source-local renderer's narrow contract and are skipped.
+    """
+    if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+        return False
+    target = node.targets[0]
+    return isinstance(target, ast.Name) and target.id == "__all__"
 
 
-def _range(source: str, node: ast.AST) -> tuple[int, int]:
+def _byte_range(source: str, node: ast.AST) -> tuple[int, int]:
+    """Return UTF-8 byte offsets compatible with Python AST columns."""
     lines = source.splitlines(keepends=True)
-    start = sum(len(line) for line in lines[: node.lineno - 1]) + node.col_offset
-    end = sum(len(line) for line in lines[: node.end_lineno - 1]) + node.end_col_offset
+    start = len("".join(lines[: node.lineno - 1]).encode("utf-8")) + node.col_offset
+    end = (
+        len("".join(lines[: node.end_lineno - 1]).encode("utf-8")) + node.end_col_offset
+    )
     return start, end
 
 
-def _line_end(source: str, offset: int) -> int:
+def _line_end(source: bytes, offset: int) -> int:
     """Return the offset after an optional platform-neutral line ending."""
-    if source.startswith("\r\n", offset):
+    if source.startswith(b"\r\n", offset):
         return offset + 2
-    if source.startswith("\n", offset):
+    if source.startswith(b"\n", offset):
         return offset + 1
     return offset
 
 
-def _apply(root: Path, operations: tuple[_Operation, ...]) -> dict[str, str]:
-    edits_by_path: dict[str, list[_Edit]] = {}
-    for operation in operations:
-        for path, edits in operation.edits_by_path:
-            edits_by_path.setdefault(path, []).extend(edits)
-    originals: dict[str, str] = {}
-    for path, edits in edits_by_path.items():
+def _has_dynamic_all_mutation(tree: ast.Module) -> bool:
+    """Conservatively reject writes or method calls that mutate ``__all__``."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            if any(_is_indirect_all_target(target) for target in node.targets):
+                return True
+        if isinstance(node, ast.AnnAssign) and _is_indirect_all_target(node.target):
+            return True
+        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            if node.target.id == "__all__":
+                return True
+        if isinstance(node, ast.AugAssign) and _is_indirect_all_target(node.target):
+            return True
+        if isinstance(node, ast.Delete) and any(
+            _references_all_target(target) for target in node.targets
+        ):
+            return True
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if (
+                isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "__all__"
+            ):
+                return True
+    return False
+
+
+def _references_all_target(node: ast.expr) -> bool:
+    """Return whether an assignment-like target starts from ``__all__``."""
+    if isinstance(node, ast.Name):
+        return node.id == "__all__"
+    if isinstance(node, ast.Subscript):
+        return _references_all_target(node.value)
+    if isinstance(node, ast.Attribute):
+        return _references_all_target(node.value)
+    return False
+
+
+def _is_indirect_all_target(node: ast.expr) -> bool:
+    """Distinguish the supported direct assignment from other ``__all__`` writes."""
+    return _references_all_target(node) and not (
+        isinstance(node, ast.Name) and node.id == "__all__"
+    )
+
+
+def _has_overlapping_edits(edits: list[_Edit]) -> bool:
+    """Return whether byte ranges overlap after the shared-plan merge."""
+    previous_end = -1
+    for edit in sorted(edits, key=lambda item: item.start):
+        if edit.start < previous_end:
+            return True
+        previous_end = edit.end
+    return False
+
+
+def _apply(root: Path, plan: _EditPlan) -> dict[str, bytes]:
+    """Apply one complete byte-edit plan and retain exact rollback bytes."""
+    originals: dict[str, bytes] = {}
+    for path, _ in plan.edits_by_path:
         source_path = root / path
-        source = source_path.read_text(encoding="utf-8")
-        originals[path] = source
-        for edit in sorted(edits, key=lambda item: item.start, reverse=True):
-            source = source[: edit.start] + edit.replacement + source[edit.end :]
-        source_path.write_text(source, encoding="utf-8")
+        originals[path] = source_path.read_bytes()
+    try:
+        for path, edits in plan.edits_by_path:
+            source = originals[path]
+            for edit in sorted(edits, key=lambda item: item.start, reverse=True):
+                source = source[: edit.start] + edit.replacement + source[edit.end :]
+            (root / path).write_bytes(source)
+    except OSError:
+        _restore(root, originals)
+        raise
     return originals
 
 
-def _restore(root: Path, originals: dict[str, str]) -> None:
+def _restore(root: Path, originals: dict[str, bytes]) -> None:
+    """Restore exact original bytes for an unaccepted atomic edit plan."""
     for path, source in originals.items():
-        (root / path).write_text(source, encoding="utf-8")
+        (root / path).write_bytes(source)
 
 
 def _line_count(root: Path) -> int:
