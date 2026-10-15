@@ -186,13 +186,16 @@ pyrepro prune-imports ~/my_project \
   -- python run_target.py
 ```
 
-This stage supports only simple one-line top-level `import` / `from ... import`
-statements without inline comments or semicolon chaining, and static one-line
-`__all__` lists or tuples. For a package re-export, the import binding and its
-corresponding `__all__` entry are one atomic proposal. Complex statements,
-dynamic imports, wildcard imports, and dynamic exports are skipped rather than
-rewritten. `prune-imports` does not run greedy, ddmin, or symbol reduction;
-P5.3 will compose verified preprocessing with those existing reducers.
+The unreleased P7 implementation extends this stage to top-level single-line
+and parenthesized multiline `import` / `from ... import` statements, plus one
+static literal `__all__` list or tuple. It skips any edited span with comments
+or semicolon chaining. For a package re-export, all selected import bindings
+and their shared `__all__` entries form one atomic proposal. Dynamic imports,
+wildcard imports, dynamic exports, annotated or multiple-target `__all__`
+assignments, and source shapes that cannot be safely composed are skipped rather
+than rewritten. `prune-imports` does not run greedy, ddmin, or symbol reduction;
+the preprocessing-first reducer composes verified preprocessing with file
+reduction.
 
 ## Included smoke fixtures
 

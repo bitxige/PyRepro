@@ -33,7 +33,7 @@ PyRepro 是一个面向 Python 项目运行故障的自动复现缩减工具。�
 通过“删减后是否仍复现同一故障”的可执行判据进行搜索。完整决策记录见
 [`0007-pivot-to-failure-reduction.md`](decisions/0007-pivot-to-failure-reduction.md)。
 
-## 当前 P6
+## 当前实现与阶段演进
 
 P1 将 P0 的最小闭环扩展到开发者明确选择的可信本地项目：
 
@@ -63,16 +63,20 @@ P5.1 增加只读的通用静态导入分析：它识别 flat / `src` 布局、�
 
 P5.2a/b 在显式 pytest node ID 下将候选范围收窄到目标测试函数：它保留目标函数、
 可静态发现的同模块 helper / fixture、decorator 与模块加载上下文所使用的 import，
-而不让同一模块中其他测试函数的引用永久锁住候选。静态 ``__all__`` re-export 候选
+而不让同一模块中其他测试函数的引用永久锁住候选。静态 `__all__` re-export 候选
 携带需要同步更新的行号；明显 import-time side effect 的候选携带风险标记，仍必须
 由后续 Oracle 验证。该阶段同样不执行命令或修改源码。
 
 P5.2c 将上述候选转换为受限、可回滚的动态验证操作。它仅在临时工作副本中建立三次
-稳定 baseline，再优先批量修改简单的单行顶层 import；批量失败后完整还原，并在
+稳定 baseline，并优先批量修改简单的顶层 import；批量失败后完整还原，并在
 `--max-import-probes` 上限内二分。带风险标记的候选与普通候选分组处理，仍只能在 strict
 failure oracle 确认同一故障后接受。静态 `__all__` re-export 会与对应 import 一起作为
-原子编辑。复杂、多行、动态或通配导入会保守跳过。P5.2c 不启动任何文件/symbol 缩减，
-也不针对特定仓库目录或模块写规则。
+原子编辑。P5.2c 不启动任何文件/symbol 缩减，也不针对特定仓库目录或模块写规则。
+
+P7 正在扩展该编辑器，使其可在严格 Oracle 验证下处理受限的顶层括号多行 import 和
+静态多行 `__all__` 原子编辑，并在每个 probe 重新解析当前工作区源码。动态导入、复杂
+赋值、通配导入、含注释的编辑区间及无法安全解析的语法仍保守跳过。P7 尚待安全审查与
+跨仓库实验验收，不能视为已发布能力。
 
 P5.3 将经验证的 import pruning、可选的通用目录粗粒度删除和既有 greedy cleanup
 组合到同一 `ReductionWorkspace` 中；它复用一次 baseline 和 probe telemetry。真实
@@ -101,7 +105,8 @@ P1 会重复执行用户提供的命令，因此只适用于用户信任的本�
 | P5.2c | 有界批量 import candidate 的 execution-verified 验证（已完成） |
 | P5.3a | Import Pruning 与 Greedy 的同 workspace 组合验证（已完成） |
 | P5.3b | 通用粗粒度预缩减与流水线扩展（已完成） |
-| P6 | 有预算的 Fast Mode、verified publishing 与 CLI 交付（当前） |
+| P6 | 有预算的 Fast Mode、verified publishing 与 CLI 交付（已完成） |
+| P7 | 原子多行 Import-surface Pruning（实现中，待安全审查与实验验收） |
 
 ## 明确不做
 
