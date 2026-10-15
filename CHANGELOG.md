@@ -11,6 +11,8 @@ experiments remain available through Git history.
   parenthesized multiline imports with one literal multiline `__all__` update.
   Plans use UTF-8 byte ranges, are rebuilt from current workspace source for
   every probe, and restore the complete edit on rejection or budget stop.
+  Existing single-line edit shapes are scheduled as a compatibility cohort
+  before P7-only multiline operations under the same bounded probe budget.
 
 - Added opt-in `pyrepro reduce --mode fast` CLI integration for the existing
   preprocessing-first pipeline, shared Oracle/time budgets, staging 3/3

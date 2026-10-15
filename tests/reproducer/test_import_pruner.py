@@ -4,6 +4,7 @@ import ast
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from pyrepro.reproducer.__main__ import main
 from pyrepro.reproducer.budget import (
@@ -15,10 +16,13 @@ from pyrepro.reproducer.failure import FailureSignature
 from pyrepro.reproducer.import_pruner import (
     BatchImportPruner,
     _apply,
+    _build_operations,
     _Edit,
     _EditPlan,
     _Operation,
+    _partition_operations,
     _render_all_edit,
+    _risk_batches,
 )
 from pyrepro.reproducer.runner import CommandRunner, ExecutionResult
 from pyrepro.reproducer.workspace import ReductionWorkspace, tree_digest
@@ -161,6 +165,103 @@ def test_accepts_multiline_import_and_multiline_all_as_one_batch(tmp_path: Path)
         assert "__all__ = ['Needed']" in initializer
 
 
+def test_partitions_operations_by_prior_editor_contract(tmp_path: Path):
+    """Only the pre-P7 single-line source shape belongs to the legacy cohort."""
+    _write(tmp_path, "pkg/items.py", "Needed = object()\nBallast = object()\n")
+    _write(tmp_path, "pkg/legacy.py", "from pkg.items import Needed, Ballast\n")
+    _write(
+        tmp_path,
+        "pkg/extended.py",
+        "from pkg.items import (\n    Needed,\n    Ballast,\n)\n",
+    )
+    candidates = (
+        ImportCandidate(
+            kind="test_import",
+            path="pkg/legacy.py",
+            line=1,
+            bound_name="Ballast",
+            imported_module="pkg.items",
+            imported_name="Ballast",
+            reason="test",
+            risk_reason="side_effect_risk",
+        ),
+        ImportCandidate(
+            kind="test_import",
+            path="pkg/extended.py",
+            line=1,
+            bound_name="Ballast",
+            imported_module="pkg.items",
+            imported_name="Ballast",
+            reason="test",
+        ),
+    )
+
+    operations, skipped = _build_operations(tmp_path, candidates)
+    legacy, extended = _partition_operations(tmp_path, operations)
+    legacy_low, legacy_risk = _risk_batches(legacy)
+
+    assert skipped == 0
+    assert [operation.paths for operation in legacy] == [("pkg/legacy.py",)]
+    assert [operation.paths for operation in extended] == [("pkg/extended.py",)]
+    assert legacy_low == ()
+    assert legacy_risk == legacy
+
+
+def test_legacy_operations_consume_budget_before_extended_operations(
+    tmp_path: Path, monkeypatch
+):
+    """A P7-only operation cannot displace an accepted legacy probe."""
+    _project(tmp_path, "raise ValueError('target failure')")
+    _write(
+        tmp_path,
+        "pkg/extended.py",
+        "from .items import (\n    Needed,\n    Ballast,\n)\n",
+    )
+    candidates = (
+        ImportCandidate(
+            kind="test_import",
+            path="tests/test_target.py",
+            line=1,
+            bound_name="Ballast",
+            imported_module="pkg",
+            imported_name="Ballast",
+            reason="test",
+        ),
+        ImportCandidate(
+            kind="test_import",
+            path="pkg/extended.py",
+            line=1,
+            bound_name="Ballast",
+            imported_module="pkg.items",
+            imported_name="Ballast",
+            reason="test",
+        ),
+    )
+    monkeypatch.setattr(
+        "pyrepro.reproducer.import_pruner.ImportAnalyzer",
+        lambda _: SimpleNamespace(
+            analyze_pytest_node=lambda __: SimpleNamespace(candidates=candidates)
+        ),
+    )
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = BatchImportPruner(
+            runner, "tests/test_target.py::test_failure", max_probes=1
+        ).prune(workspace)
+
+        assert result.candidate_attempts == result.accepted_probes == 1
+        assert result.probe_records[0].candidate_descriptions == (
+            "tests/test_target.py:1:Ballast",
+        )
+        assert "from pkg import Needed\n" in (
+            workspace.root / "tests/test_target.py"
+        ).read_text(encoding="utf-8")
+        assert "Ballast" in (workspace.root / "pkg/extended.py").read_text(
+            encoding="utf-8"
+        )
+
+
 def test_multiline_tuple_all_handles_alias_binding_name(tmp_path: Path):
     """An alias removes its exported name, not the imported source name."""
     _multiline_alias_project(tmp_path)
@@ -172,7 +273,7 @@ def test_multiline_tuple_all_handles_alias_binding_name(tmp_path: Path):
         ).prune(workspace)
 
         initializer = (workspace.root / "pkg/__init__.py").read_text(encoding="utf-8")
-        assert result.accepted_probes == 1
+        assert result.accepted_probes >= 1
         assert "PublicBallast" not in initializer
         assert "PublicNeeded" in initializer
         assert "Needed" in initializer

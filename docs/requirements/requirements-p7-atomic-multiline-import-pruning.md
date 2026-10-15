@@ -33,11 +33,11 @@ manual HTTPX 13-file feasibility result.
 
 ## Scope
 
-P7 changes only the source-local operation builder used by
-`BatchImportPruner`. It reuses without modification:
+P7 changes the source-local operation builder and its bounded operation
+scheduler in `BatchImportPruner`. It reuses without modification:
 
 - `ImportAnalyzer` target-aware candidate discovery;
-- the existing batch/split search and its probe limit;
+- the existing batch/split search and its total probe limit;
 - `ReductionWorkspace`, source-integrity checks, and transaction rollback;
 - `ExecutionBudget`, Fast Mode reservation semantics, and Oracle timeouts;
 - the strict failure classifier and `ProbeRecord` format; and
@@ -45,6 +45,26 @@ P7 changes only the source-local operation builder used by
 
 The public CLI and reducer ordering do not change. No new reducer, matching
 mode, or benchmark strategy is introduced.
+
+### Compatibility scheduling
+
+Expanding the supported source shapes must not silently displace operations
+that the pre-P7 editor could already construct under the same bounded budget.
+Before batch search, P7 partitions operations by the pre-P7 source contract:
+
+1. **Legacy operations** have a top-level, comment-free, semicolon-free
+   single-line import and, when needed, one equivalent single-line static
+   `__all__` assignment.
+2. **Extended operations** require P7-only multiline import or multiline
+   `__all__` support.
+
+The pruner processes the complete Legacy cohort first, preserving its prior
+discovery order and low-risk-then-risk-marked batch/split order. It then uses
+only the remaining shared probe budget for the Extended cohort. Cohorts never
+share a batch. Every extended edit plan is rebuilt against the current
+workspace after any accepted Legacy edit. This is a scheduling compatibility
+rule, not a change to Oracle acceptance, candidate ranking, or the total
+budget.
 
 ## Supported edit shape
 
@@ -186,6 +206,10 @@ P7 requires focused automated coverage before any repository benchmark:
 11. `PreprocessingFirstReducer` still shares its workspace/baseline with coarse
    and greedy stages, including Fast Mode budget-stop behavior.
 12. Ruff and the complete test suite pass.
+13. When Legacy and Extended operations coexist under a constrained total
+    budget, a Legacy operation receives its existing low-risk/risk batch
+    opportunity before any Extended operation. When no Legacy operation exists,
+    Extended operations retain access to the full budget.
 
 ## Evaluation plan
 

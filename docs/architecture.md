@@ -135,6 +135,10 @@ existing failure oracle remains the sole acceptance authority. P7 additionally
 supports a deliberately narrow parenthesized multiline form with one static
 literal list or tuple `__all__`; each probe reparses current workspace source,
 and annotated or multiple-target `__all__` assignments remain unsupported.
+When P7-only multiline operations coexist with prior single-line editor
+shapes, it completes the prior low-risk/risk cohort first under the same shared
+probe cap, then spends only any remainder on the P7-only cohort. This preserves
+existing bounded-search opportunities without changing Oracle acceptance.
 
 Inline comments, semicolon chaining, wildcard imports, dynamic imports, and
 dynamic or complex `__all__` constructs are skipped rather than broadly

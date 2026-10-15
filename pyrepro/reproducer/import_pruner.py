@@ -158,34 +158,35 @@ class BatchImportPruner:
             baseline_runs = 0
         analysis = ImportAnalyzer(workspace.root).analyze_pytest_node(self.pytest_node)
         operations, skipped = _build_operations(workspace.root, analysis.candidates)
+        legacy_operations, extended_operations = _partition_operations(
+            workspace.root, operations
+        )
         initial_lines = _line_count(workspace.root)
         records: list[ProbeRecord] = []
         accepted = rejected = 0
         budget_exhausted = False
-        low_risk = tuple(
-            operation
-            for operation in operations
-            if all(candidate.risk_reason is None for candidate in operation.candidates)
-        )
-        risk_marked = tuple(op for op in operations if op not in low_risk)
-        for batch in (low_risk, risk_marked):
-            if not batch or len(records) >= self.max_probes:
-                continue
-            if budget is not None and not budget.can_start_probe():
-                budget_exhausted = True
-                break
-            new_records, new_accepted, new_rejected, stopped = self._search(
-                workspace.root,
-                batch,
-                baseline,
-                self.max_probes - len(records),
-                budget,
-            )
-            records.extend(new_records)
-            accepted += new_accepted
-            rejected += new_rejected
-            if stopped:
-                budget_exhausted = True
+        for cohort in (legacy_operations, extended_operations):
+            low_risk, risk_marked = _risk_batches(cohort)
+            for batch in (low_risk, risk_marked):
+                if not batch or len(records) >= self.max_probes:
+                    continue
+                if budget is not None and not budget.can_start_probe():
+                    budget_exhausted = True
+                    break
+                new_records, new_accepted, new_rejected, stopped = self._search(
+                    workspace.root,
+                    batch,
+                    baseline,
+                    self.max_probes - len(records),
+                    budget,
+                )
+                records.extend(new_records)
+                accepted += new_accepted
+                rejected += new_rejected
+                if stopped:
+                    budget_exhausted = True
+                    break
+            if budget_exhausted:
                 break
         executions += len(records)
         if verify_final and not budget_exhausted:
@@ -367,6 +368,88 @@ def _build_operations(
         else:
             operations.append(operation)
     return tuple(operations), skipped
+
+
+def _partition_operations(
+    root: Path, operations: tuple[_Operation, ...]
+) -> tuple[tuple[_Operation, ...], tuple[_Operation, ...]]:
+    """Separate prior single-line shapes from P7-only source shapes.
+
+    The legacy cohort is defined by the old editor's actual source contract,
+    rather than by a broad path or candidate-kind heuristic. It keeps its
+    original discovery order and risk batching so newly supported multiline
+    shapes cannot consume the bounded probe budget before existing operations.
+    """
+    legacy: list[_Operation] = []
+    extended: list[_Operation] = []
+    for operation in operations:
+        if _is_legacy_operation(root, operation):
+            legacy.append(operation)
+        else:
+            extended.append(operation)
+    return tuple(legacy), tuple(extended)
+
+
+def _risk_batches(
+    operations: tuple[_Operation, ...],
+) -> tuple[tuple[_Operation, ...], tuple[_Operation, ...]]:
+    """Return the existing low-risk then risk-marked batch order unchanged."""
+    low_risk = tuple(
+        operation
+        for operation in operations
+        if all(candidate.risk_reason is None for candidate in operation.candidates)
+    )
+    risk_marked = tuple(
+        operation for operation in operations if operation not in low_risk
+    )
+    return low_risk, risk_marked
+
+
+def _is_legacy_operation(root: Path, operation: _Operation) -> bool:
+    """Return whether one operation fits the pre-P7 source-editor contract."""
+    candidates_by_path: dict[str, list[ImportCandidate]] = {}
+    for candidate in operation.candidates:
+        candidates_by_path.setdefault(candidate.path, []).append(candidate)
+
+    for path, candidates in candidates_by_path.items():
+        try:
+            source = (root / path).read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=path)
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            return False
+        matched = {
+            node
+            for candidate in candidates
+            for node in _matching_import_nodes(tree, candidate)
+        }
+        if len(matched) != 1:
+            return False
+        import_node = next(iter(matched))
+        if import_node.lineno != import_node.end_lineno or not _safe_statement(
+            source, import_node
+        ):
+            return False
+
+        all_lines = {
+            candidate.all_line for candidate in candidates if candidate.all_line
+        }
+        if not all_lines:
+            continue
+        if len(all_lines) != 1:
+            return False
+        all_nodes = [
+            node
+            for node in tree.body
+            if _is_all(node) and node.lineno == next(iter(all_lines))
+        ]
+        if len(all_nodes) != 1:
+            return False
+        all_node = all_nodes[0]
+        if all_node.lineno != all_node.end_lineno or not _safe_statement(
+            source, all_node
+        ):
+            return False
+    return True
 
 
 def _build_edit_plan(
