@@ -9,7 +9,7 @@ import pytest
 from pyrepro.reproducer import probe_report
 from pyrepro.reproducer.__main__ import main
 from pyrepro.reproducer.publisher import FastModeTerminalState, PublishingResult
-from pyrepro.reproducer.runner import CommandRunner
+from pyrepro.reproducer.runner import CommandRunner, ExecutionResult
 from pyrepro.reproducer.workspace import tree_digest
 
 FAILING_PROJECT = Path(__file__).parents[2] / "examples" / "failing_project"
@@ -65,6 +65,58 @@ def test_module_cli_writes_a_verified_reduced_project(tmp_path: Path, capsys):
     assert "Original modified: no" in captured.out
     assert "Probe telemetry" in captured.out
     assert "Different failures:" in captured.out
+    assert (output / "reproduce.py").is_file()
+
+
+def test_standard_mode_rejects_an_output_copy_with_a_different_failure(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+):
+    """Do not report success when copied output no longer matches the baseline."""
+    output = tmp_path / "reduced-project"
+    original_run = CommandRunner.run
+
+    def return_success_for_copied_output(
+        runner: CommandRunner,
+        working_directory: Path,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ExecutionResult:
+        if working_directory == output:
+            return ExecutionResult(
+                command=runner.command,
+                return_code=0,
+                stdout="",
+                stderr="",
+                timed_out=False,
+            )
+        return original_run(
+            runner,
+            working_directory,
+            timeout_seconds=timeout_seconds,
+        )
+
+    monkeypatch.setattr(CommandRunner, "run", return_success_for_copied_output)
+
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "reduce",
+                str(FAILING_PROJECT),
+                "--output",
+                str(output),
+                "--",
+                sys.executable,
+                "reproduce.py",
+            ]
+        )
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 2
+    assert (
+        "copied reduced project did not reproduce the baseline failure" in captured.err
+    )
+    assert "Reduced project:" not in captured.out
     assert (output / "reproduce.py").is_file()
 
 
