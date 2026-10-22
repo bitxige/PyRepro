@@ -14,6 +14,7 @@ from pyrepro.reproducer.failure import (
 from pyrepro.reproducer.import_pruner import BatchImportPruner
 from pyrepro.reproducer.preprocessing import PreprocessingFirstReducer
 from pyrepro.reproducer.runner import CommandRunner
+from pyrepro.reproducer.symbol_reducer import SymbolOrder
 from pyrepro.reproducer.workspace import ReductionWorkspace, tree_digest
 
 
@@ -238,6 +239,40 @@ def test_six_execution_budget_starts_no_search_probe(tmp_path: Path):
         ).read_text(encoding="utf-8")
 
 
+def test_pipeline_runs_optional_budgeted_symbol_stage_after_file_cleanup(
+    tmp_path: Path,
+):
+    """Fast stages aggregate symbol telemetry without consuming final reserve."""
+    _symbol_project(tmp_path)
+    digest = tree_digest(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+    budget = ExecutionBudget(20)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = PreprocessingFirstReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            max_import_probes=1,
+            max_coarse_probes=0,
+            max_symbol_probes=1,
+            symbol_order=SymbolOrder.SPAN_DESC,
+        ).reduce(workspace, budget=budget)
+
+        assert result.symbol_reduction is not None
+        assert result.symbol_reduction.candidate_attempts == 1
+        assert result.symbol_reduction.accepted_removals == 1
+        assert result.symbol_reduction.executions == 1
+        assert not result.symbol_reduction.budget_exhausted
+        assert result.executions == budget.snapshot().executions_started
+        assert result.symbol_reduction.probe_records[0].phase == "symbol"
+        assert "symbol" in {record.phase for record in result.probe_records}
+        assert "removable_ballast" not in (workspace.root / "target.py").read_text(
+            encoding="utf-8"
+        )
+
+    assert tree_digest(tmp_path) == digest
+
+
 def test_coarse_stops_before_split_when_global_budget_is_exhausted(tmp_path: Path):
     """A rejected group cannot consume extra split probes after its last slot."""
     _nested_project(tmp_path)
@@ -346,6 +381,33 @@ def _rejected_import_project(root: Path) -> None:
         "    assert Needed is not None\n"
         "    assert globals()['Ballast'] is not None\n"
         "    raise ValueError('target failure')\n",
+    )
+    _write(
+        root,
+        "run_target.py",
+        "from tests.test_target import test_failure\ntest_failure()\n",
+    )
+
+
+def _symbol_project(root: Path) -> None:
+    _write(root, "tests/__init__.py", "")
+    _write(
+        root,
+        "target.py",
+        "def removable_ballast() -> int:\n"
+        "    first = 1\n"
+        "    second = 2\n"
+        "    third = 3\n"
+        "    return first + second + third\n\n"
+        "def target_failure() -> None:\n"
+        "    raise ValueError('target failure')\n",
+    )
+    _write(
+        root,
+        "tests/test_target.py",
+        "from target import target_failure\n\n"
+        "def test_failure() -> None:\n"
+        "    target_failure()\n",
     )
     _write(
         root,

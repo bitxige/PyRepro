@@ -7,6 +7,11 @@ experiments remain available through Git history.
 
 ### Added
 
+- Added opt-in Fast Mode complete-symbol reduction through
+  `--max-symbol-probes` and `--symbol-order`. The stage is disabled by default,
+  shares the existing Oracle/time budget and probe telemetry, and leaves final
+  staging verification and no-clobber publication under the existing Publisher.
+
 - Extended execution-verified import pruning to safely compose top-level
   parenthesized multiline imports with one literal multiline `__all__` update.
   Plans use UTF-8 byte ranges, are rebuilt from current workspace source for

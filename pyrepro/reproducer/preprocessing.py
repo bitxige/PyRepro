@@ -11,6 +11,11 @@ from pyrepro.reproducer.failure import FailureMatchMode
 from pyrepro.reproducer.import_pruner import BatchImportPruner, ImportPruningResult
 from pyrepro.reproducer.reducer import GreedyFileReducer, ProbeRecord, ReductionResult
 from pyrepro.reproducer.runner import CommandRunner
+from pyrepro.reproducer.symbol_reducer import (
+    GreedySymbolReducer,
+    SymbolOrder,
+    SymbolReductionResult,
+)
 from pyrepro.reproducer.workspace import ReductionWorkspace
 
 
@@ -21,6 +26,7 @@ class PreprocessingReductionResult:
     import_pruning: ImportPruningResult
     coarse_reduction: CoarseReductionResult | None
     file_reduction: ReductionResult
+    symbol_reduction: SymbolReductionResult | None
     executions: int
     wall_clock_seconds: float
     probe_records: tuple[ProbeRecord, ...]
@@ -45,6 +51,8 @@ class PreprocessingFirstReducer:
         match_mode: FailureMatchMode = FailureMatchMode.STRICT,
         max_import_probes: int = 16,
         max_coarse_probes: int = 0,
+        max_symbol_probes: int = 0,
+        symbol_order: SymbolOrder = SymbolOrder.DISCOVERY,
     ) -> None:
         """Configure the preprocessing-first reduction pipeline.
 
@@ -57,6 +65,10 @@ class PreprocessingFirstReducer:
             max_coarse_probes: Bound for optional directory-group probes before
                 greedy cleanup. Zero preserves import-pruning then greedy-only
                 behavior.
+            max_symbol_probes: Bound for optional complete-symbol probes after
+                file cleanup. Zero preserves the existing Fast Mode pipeline.
+            symbol_order: Deterministic order used only when symbol probes are
+                enabled.
         """
         self.runner = runner
         self.pytest_node = pytest_node
@@ -64,6 +76,8 @@ class PreprocessingFirstReducer:
         self.match_mode = match_mode
         self.max_import_probes = max_import_probes
         self.max_coarse_probes = max_coarse_probes
+        self.max_symbol_probes = max_symbol_probes
+        self.symbol_order = symbol_order
 
     def reduce(
         self,
@@ -101,27 +115,46 @@ class PreprocessingFirstReducer:
             budget=budget,
             verify_final=budget is None,
         )
+        symbol_result = None
+        if self.max_symbol_probes:
+            symbol_result = GreedySymbolReducer(
+                self.runner,
+                match_mode=self.match_mode,
+                max_probes=self.max_symbol_probes,
+                candidate_order=self.symbol_order,
+            ).reduce(
+                workspace,
+                import_result.baseline_signature,
+                budget=budget,
+                verify_final=budget is None,
+            )
         return PreprocessingReductionResult(
             import_pruning=import_result,
             coarse_reduction=coarse_result,
             file_reduction=file_result,
+            symbol_reduction=symbol_result,
             executions=(
                 import_result.executions
                 + (0 if coarse_result is None else coarse_result.executions)
                 + file_result.executions
+                + (0 if symbol_result is None else symbol_result.executions)
             ),
             wall_clock_seconds=perf_counter() - started,
             probe_records=(
                 import_result.probe_records
                 + (() if coarse_result is None else coarse_result.probe_records)
                 + file_result.probe_records
+                + (() if symbol_result is None else symbol_result.probe_records)
             ),
             source_unchanged=(
-                import_result.source_unchanged and file_result.source_unchanged
+                import_result.source_unchanged
+                and file_result.source_unchanged
+                and (symbol_result is None or symbol_result.source_unchanged)
             ),
             budget_exhausted=(
                 import_result.budget_exhausted
                 or (coarse_result is not None and coarse_result.budget_exhausted)
                 or file_result.budget_exhausted
+                or (symbol_result is not None and symbol_result.budget_exhausted)
             ),
         )

@@ -4,12 +4,15 @@ import ast
 import sys
 from pathlib import Path
 
+from pyrepro.reproducer.budget import ExecutionBudget
 from pyrepro.reproducer.failure import FailureSignature, ReductionOutcome
 from pyrepro.reproducer.reducer import GreedyFileReducer
 from pyrepro.reproducer.runner import CommandRunner
 from pyrepro.reproducer.symbol_reducer import (
     GreedySymbolReducer,
     SymbolCandidate,
+    SymbolOrder,
+    _order_candidates,
     _remove_symbol_span,
     discover_symbols,
 )
@@ -92,6 +95,49 @@ def test_discovery_skips_unparsable_source(tmp_path: Path):
 
     assert discovery.skipped
     assert not discovery.candidates
+
+
+def test_span_desc_order_prefers_larger_symbols_with_stable_tiebreakers():
+    """Span ordering is deterministic and does not require oracle knowledge."""
+    candidates = (
+        SymbolCandidate("b.py", "small", "function", 1, 2),
+        SymbolCandidate("a.py", "first", "class", 10, 14),
+        SymbolCandidate("a.py", "second", "function", 1, 5),
+    )
+
+    ordered = _order_candidates(candidates, SymbolOrder.SPAN_DESC)
+
+    assert [candidate.qualified_name for candidate in ordered] == [
+        "second",
+        "first",
+        "small",
+    ]
+
+
+def test_budgeted_symbol_reduction_stops_without_mutating_workspace(tmp_path: Path):
+    """Final-verification reserve prevents a Fast symbol probe from starting."""
+    runner = CommandRunner((sys.executable, "reproduce.py"), timeout_seconds=2)
+    with ReductionWorkspace(SYMBOL_PROJECT) as workspace:
+        budget = ExecutionBudget(6)
+        file_result = GreedyFileReducer(runner).reduce(
+            workspace, budget=budget, verify_final=False
+        )
+        before = tree_digest(workspace.root)
+
+        result = GreedySymbolReducer(
+            runner, max_probes=1, candidate_order=SymbolOrder.SPAN_DESC
+        ).reduce(
+            workspace,
+            file_result.baseline_signature,
+            budget=budget,
+            verify_final=False,
+        )
+
+        assert result.candidate_attempts == 0
+        assert result.executions == 0
+        assert not result.probe_records
+        assert result.budget_exhausted
+        assert tree_digest(workspace.root) == before
 
 
 def test_symbol_reducer_removes_internal_ballast_after_file_reduction(

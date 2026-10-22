@@ -73,10 +73,9 @@ P5.2c 将上述候选转换为受限、可回滚的动态验证操作。它仅�
 failure oracle 确认同一故障后接受。静态 `__all__` re-export 会与对应 import 一起作为
 原子编辑。P5.2c 不启动任何文件/symbol 缩减，也不针对特定仓库目录或模块写规则。
 
-P7 正在扩展该编辑器，使其可在严格 Oracle 验证下处理受限的顶层括号多行 import 和
+P7 已扩展该编辑器，使其可在严格 Oracle 验证下处理受限的顶层括号多行 import 和
 静态多行 `__all__` 原子编辑，并在每个 probe 重新解析当前工作区源码。动态导入、复杂
-赋值、通配导入、含注释的编辑区间及无法安全解析的语法仍保守跳过。P7 尚待安全审查与
-跨仓库实验验收，不能视为已发布能力。
+赋值、通配导入、含注释的编辑区间及无法安全解析的语法仍保守跳过。
 
 P5.3 将经验证的 import pruning、可选的通用目录粗粒度删除和既有 greedy cleanup
 组合到同一 `ReductionWorkspace` 中；它复用一次 baseline 和 probe telemetry。真实
@@ -87,6 +86,10 @@ P6 Fast Mode 将该流水线置于一个共享的 Oracle 执行/时间预算下�
 修改会回滚，已接受的 workspace 始终保留。当前 Fast Mode CLI 会把候选复制到 staging
 目录，在其中完成独立 3/3 验证后，才以 Linux 原子 no-clobber 方式发布官方 reproducer。
 预算停止只有在 final 3/3 已完成且发布成功时才能返回 verified 状态。
+
+Fast Mode 可选在文件级 cleanup 后执行已有的完整顶层 symbol 缩减。该阶段默认关闭；
+启用时以共享执行预算、有界 probe 数和既有严格 Oracle 运行，最终仍由 staging 3/3
+验证和发布流程决定是否交付。`span-desc` 只改变候选尝试顺序，不作为删除许可。
 
 P1 会重复执行用户提供的命令，因此只适用于用户信任的本地代码与命令。它不承诺
 通用仓库隔离、最小化全局最优解或任意命令的安全执行。
@@ -106,7 +109,8 @@ P1 会重复执行用户提供的命令，因此只适用于用户信任的本�
 | P5.3a | Import Pruning 与 Greedy 的同 workspace 组合验证（已完成） |
 | P5.3b | 通用粗粒度预缩减与流水线扩展（已完成） |
 | P6 | 有预算的 Fast Mode、verified publishing 与 CLI 交付（已完成） |
-| P7 | 原子多行 Import-surface Pruning（实现中，待安全审查与实验验收） |
+| P7 | 原子多行 Import-surface Pruning（已完成） |
+| P3 Fast 集成 | 可选 Symbol 阶段与有界候选排序（实现中，待端到端验收） |
 
 ## 明确不做
 

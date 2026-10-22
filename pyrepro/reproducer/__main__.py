@@ -39,6 +39,7 @@ from pyrepro.reproducer.reducer import (
 from pyrepro.reproducer.runner import CommandRunner
 from pyrepro.reproducer.symbol_reducer import (
     GreedySymbolReducer,
+    SymbolOrder,
     format_symbol_reduction_summary,
 )
 from pyrepro.reproducer.workspace import ReductionWorkspace
@@ -155,6 +156,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=int,
         default=16,
         help="bounded coarse file probes for --mode fast (default: 16; zero disables)",
+    )
+    reduce_parser.add_argument(
+        "--max-symbol-probes",
+        type=int,
+        default=0,
+        help=(
+            "bounded complete-symbol probes after Fast Mode file cleanup "
+            "(default: 0; zero disables)"
+        ),
+    )
+    reduce_parser.add_argument(
+        "--symbol-order",
+        choices=tuple(order.value for order in SymbolOrder),
+        default=SymbolOrder.DISCOVERY.value,
+        help=(
+            "candidate order for enabled Fast Mode symbol probes (default: discovery)"
+        ),
     )
     reduce_parser.add_argument(
         "--probe-records",
@@ -291,6 +309,8 @@ def _reduce_fast(
             match_mode=match_mode,
             max_import_probes=args.max_import_probes,
             max_coarse_probes=args.max_coarse_probes,
+            max_symbol_probes=args.max_symbol_probes,
+            symbol_order=SymbolOrder(args.symbol_order),
         )
         with ReductionWorkspace(source) as workspace:
             reduction = reducer.reduce(workspace, budget=budget)
@@ -343,6 +363,10 @@ def _validate_fast_arguments(
         parser.error("--max-import-probes must be positive with --mode fast")
     if args.max_coarse_probes < 0:
         parser.error("--max-coarse-probes must not be negative with --mode fast")
+    if args.max_symbol_probes < 0:
+        parser.error("--max-symbol-probes must not be negative with --mode fast")
+    if args.max_symbol_probes == 0 and args.symbol_order != SymbolOrder.DISCOVERY.value:
+        parser.error("--symbol-order requires --max-symbol-probes greater than zero")
 
 
 def _print_fast_publication(
@@ -368,6 +392,13 @@ def _print_fast_publication(
     print(f"Reducer Oracle executions: {reduction.executions}")
     print(f"Total Oracle executions: {publication.budget.executions_started}")
     print(f"Search probes: {len(reduction.probe_records)}")
+    if reduction.symbol_reduction is not None:
+        symbol_result = reduction.symbol_reduction
+        print(
+            "Symbol probes: "
+            f"{symbol_result.candidate_attempts} "
+            f"({symbol_result.accepted_removals} accepted)"
+        )
 
 
 def _fast_state_message(publication: PublishingResult) -> str:
