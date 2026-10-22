@@ -7,6 +7,14 @@ experiments remain available through Git history.
 
 ### Added
 
+- Added default-disabled Fast Mode direct-method reduction through
+  `--max-method-probes`. It reuses the complete-symbol reducer only for direct
+  methods of module-level classes, shares the existing Oracle/time budget and
+  strict Oracle, skips sole methods to preserve valid class syntax, and remains
+  subject to the existing staging 3/3 verification and no-clobber publication.
+  JSONL probe records now expose whether a rejected source-edit candidate was
+  rolled back without changing the active workspace.
+
 - Added opt-in Fast Mode complete-symbol reduction through
   `--max-symbol-probes` and `--symbol-order`. The stage is disabled by default,
   shares the existing Oracle/time budget and probe telemetry, and leaves final

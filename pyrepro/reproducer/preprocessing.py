@@ -15,6 +15,7 @@ from pyrepro.reproducer.symbol_reducer import (
     GreedySymbolReducer,
     SymbolOrder,
     SymbolReductionResult,
+    SymbolScope,
 )
 from pyrepro.reproducer.workspace import ReductionWorkspace
 
@@ -27,6 +28,7 @@ class PreprocessingReductionResult:
     coarse_reduction: CoarseReductionResult | None
     file_reduction: ReductionResult
     symbol_reduction: SymbolReductionResult | None
+    method_reduction: SymbolReductionResult | None
     executions: int
     wall_clock_seconds: float
     probe_records: tuple[ProbeRecord, ...]
@@ -52,6 +54,7 @@ class PreprocessingFirstReducer:
         max_import_probes: int = 16,
         max_coarse_probes: int = 0,
         max_symbol_probes: int = 0,
+        max_method_probes: int = 0,
         symbol_order: SymbolOrder = SymbolOrder.DISCOVERY,
     ) -> None:
         """Configure the preprocessing-first reduction pipeline.
@@ -67,6 +70,9 @@ class PreprocessingFirstReducer:
                 behavior.
             max_symbol_probes: Bound for optional complete-symbol probes after
                 file cleanup. Zero preserves the existing Fast Mode pipeline.
+            max_method_probes: Bound for optional direct-method probes after
+                complete-symbol reduction. Zero preserves the existing Fast
+                Mode pipeline.
             symbol_order: Deterministic order used only when symbol probes are
                 enabled.
         """
@@ -77,6 +83,7 @@ class PreprocessingFirstReducer:
         self.max_import_probes = max_import_probes
         self.max_coarse_probes = max_coarse_probes
         self.max_symbol_probes = max_symbol_probes
+        self.max_method_probes = max_method_probes
         self.symbol_order = symbol_order
 
     def reduce(
@@ -128,16 +135,32 @@ class PreprocessingFirstReducer:
                 budget=budget,
                 verify_final=budget is None,
             )
+        method_result = None
+        if self.max_method_probes:
+            method_result = GreedySymbolReducer(
+                self.runner,
+                match_mode=self.match_mode,
+                max_probes=self.max_method_probes,
+                candidate_order=self.symbol_order,
+                candidate_scope=SymbolScope.METHODS,
+            ).reduce(
+                workspace,
+                import_result.baseline_signature,
+                budget=budget,
+                verify_final=budget is None,
+            )
         return PreprocessingReductionResult(
             import_pruning=import_result,
             coarse_reduction=coarse_result,
             file_reduction=file_result,
             symbol_reduction=symbol_result,
+            method_reduction=method_result,
             executions=(
                 import_result.executions
                 + (0 if coarse_result is None else coarse_result.executions)
                 + file_result.executions
                 + (0 if symbol_result is None else symbol_result.executions)
+                + (0 if method_result is None else method_result.executions)
             ),
             wall_clock_seconds=perf_counter() - started,
             probe_records=(
@@ -145,16 +168,19 @@ class PreprocessingFirstReducer:
                 + (() if coarse_result is None else coarse_result.probe_records)
                 + file_result.probe_records
                 + (() if symbol_result is None else symbol_result.probe_records)
+                + (() if method_result is None else method_result.probe_records)
             ),
             source_unchanged=(
                 import_result.source_unchanged
                 and file_result.source_unchanged
                 and (symbol_result is None or symbol_result.source_unchanged)
+                and (method_result is None or method_result.source_unchanged)
             ),
             budget_exhausted=(
                 import_result.budget_exhausted
                 or (coarse_result is not None and coarse_result.budget_exhausted)
                 or file_result.budget_exhausted
                 or (symbol_result is not None and symbol_result.budget_exhausted)
+                or (method_result is not None and method_result.budget_exhausted)
             ),
         )

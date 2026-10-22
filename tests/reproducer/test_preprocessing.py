@@ -259,6 +259,7 @@ def test_pipeline_runs_optional_budgeted_symbol_stage_after_file_cleanup(
         ).reduce(workspace, budget=budget)
 
         assert result.symbol_reduction is not None
+        assert result.method_reduction is None
         assert result.symbol_reduction.candidate_attempts == 1
         assert result.symbol_reduction.accepted_removals == 1
         assert result.symbol_reduction.executions == 1
@@ -269,6 +270,36 @@ def test_pipeline_runs_optional_budgeted_symbol_stage_after_file_cleanup(
         assert "removable_ballast" not in (workspace.root / "target.py").read_text(
             encoding="utf-8"
         )
+
+    assert tree_digest(tmp_path) == digest
+
+
+def test_pipeline_runs_method_stage_with_the_shared_budget(tmp_path: Path):
+    """Fast method probes share the budget and preserve rejected source edits."""
+    _method_symbol_project(tmp_path)
+    digest = tree_digest(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+    budget = ExecutionBudget(20)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = PreprocessingFirstReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            max_import_probes=1,
+            max_coarse_probes=0,
+            max_method_probes=2,
+            symbol_order=SymbolOrder.SPAN_DESC,
+        ).reduce(workspace, budget=budget)
+
+        assert result.symbol_reduction is None
+        assert result.method_reduction is not None
+        assert result.method_reduction.candidate_attempts == 2
+        assert result.method_reduction.accepted_removals == 1
+        assert result.method_reduction.probe_records[1].candidate_rolled_back
+        assert result.executions == budget.snapshot().executions_started
+        content = (workspace.root / "target.py").read_text(encoding="utf-8")
+        assert "def removable_ballast" not in content
+        assert "def target_failure" in content
 
     assert tree_digest(tmp_path) == digest
 
@@ -408,6 +439,33 @@ def _symbol_project(root: Path) -> None:
         "from target import target_failure\n\n"
         "def test_failure() -> None:\n"
         "    target_failure()\n",
+    )
+    _write(
+        root,
+        "run_target.py",
+        "from tests.test_target import test_failure\ntest_failure()\n",
+    )
+
+
+def _method_symbol_project(root: Path) -> None:
+    _write(root, "tests/__init__.py", "")
+    _write(
+        root,
+        "target.py",
+        "class FailureService:\n"
+        "    def removable_ballast(self) -> int:\n"
+        "        return 1\n\n"
+        "    def target_failure(self) -> None:\n"
+        "        raise ValueError('target failure')\n\n"
+        "    def spare(self) -> None:\n"
+        "        pass\n",
+    )
+    _write(
+        root,
+        "tests/test_target.py",
+        "from target import FailureService\n\n"
+        "def test_failure() -> None:\n"
+        "    FailureService().target_failure()\n",
     )
     _write(
         root,

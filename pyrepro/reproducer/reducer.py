@@ -108,6 +108,8 @@ class ProbeRecord:
             workspace proposed by this probe. For a rejected proposal, this is
             intentionally the attempted candidate state rather than the
             reducer's retained state.
+        candidate_rolled_back: Whether a rejected source-edit candidate was
+            discarded without changing the active workspace.
     """
 
     phase: str
@@ -121,6 +123,7 @@ class ProbeRecord:
     failure_signature: FailureSignature | None
     candidate_python_lines: int | None = None
     candidate_descriptions: tuple[str, ...] = ()
+    candidate_rolled_back: bool = False
 
 
 @dataclass(frozen=True)
@@ -837,6 +840,8 @@ def _probe_record(
     signature_workspace_root: Path,
     candidate_root: Path | None = None,
     candidate_python_lines: int | None = None,
+    candidate_descriptions: Sequence[str] = (),
+    candidate_rolled_back: bool = False,
 ) -> ProbeRecord:
     """Build telemetry without changing an already-classified oracle outcome."""
     source_root = candidate_root or signature_workspace_root
@@ -862,6 +867,8 @@ def _probe_record(
             result, signature_workspace_root
         ),
         candidate_python_lines=candidate_python_lines,
+        candidate_descriptions=tuple(candidate_descriptions),
+        candidate_rolled_back=candidate_rolled_back,
     )
 
 

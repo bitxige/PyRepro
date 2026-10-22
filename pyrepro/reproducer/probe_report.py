@@ -105,6 +105,7 @@ def _record_as_json(
         "phase": record.phase,
         "candidate": list(record.candidate_paths),
         "candidate_details": list(record.candidate_descriptions),
+        "candidate_rolled_back": record.candidate_rolled_back,
         "outcome": record.outcome.value,
         "accepted": record.accepted,
         "duration_seconds": record.duration_seconds,

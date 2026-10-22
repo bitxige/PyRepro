@@ -12,6 +12,7 @@ from pyrepro.reproducer.symbol_reducer import (
     GreedySymbolReducer,
     SymbolCandidate,
     SymbolOrder,
+    SymbolScope,
     _order_candidates,
     _remove_symbol_span,
     discover_symbols,
@@ -95,6 +96,108 @@ def test_discovery_skips_unparsable_source(tmp_path: Path):
 
     assert discovery.skipped
     assert not discovery.candidates
+
+
+def test_method_scope_discovers_direct_methods_and_skips_empty_class_body(
+    tmp_path: Path,
+):
+    """Method scope excludes nested and sole methods to preserve syntax."""
+    source = tmp_path / "module.py"
+    source.write_text(
+        """class Service:
+    @property
+    def name(self) -> str:
+        return "service"
+
+    async def fetch(self) -> str:
+        return "value"
+
+
+class SoleMethod:
+    def required(self) -> str:
+        return "required"
+
+
+class Outer:
+    class Nested:
+        def ignored(self) -> str:
+            return "nested"
+""",
+        encoding="utf-8",
+    )
+
+    discovery = discover_symbols(source, tmp_path, SymbolScope.METHODS)
+
+    assert not discovery.skipped
+    assert discovery.candidates == (
+        _candidate("Service.name", "method", 2, 4),
+        _candidate("Service.fetch", "async_method", 6, 7),
+    )
+    _remove_symbol_span(source, discovery.candidates[0])
+    content = source.read_text(encoding="utf-8")
+    ast.parse(content)
+    assert "@property" not in content
+    assert "def name" not in content
+    assert "async def fetch" in content
+
+
+def test_method_scope_records_candidate_identity_and_accepts_removal(
+    tmp_path: Path,
+):
+    """A method probe keeps telemetry precise and preserves the Oracle contract."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "module.py").write_text(
+        """class Service:
+    def unused(self) -> str:
+        value = "unused"
+        return value
+
+    def required(self) -> str:
+        return "required"
+
+    def spare(self) -> None:
+        pass
+""",
+        encoding="utf-8",
+    )
+    (project / "reproduce.py").write_text(
+        """from module import Service
+
+Service().required()
+raise ValueError("method reduction failure")
+""",
+        encoding="utf-8",
+    )
+    runner = CommandRunner((sys.executable, "reproduce.py"), timeout_seconds=2)
+
+    with ReductionWorkspace(project) as workspace:
+        file_result = GreedyFileReducer(runner).reduce(workspace)
+        result = GreedySymbolReducer(
+            runner,
+            max_probes=2,
+            candidate_order=SymbolOrder.SPAN_DESC,
+            candidate_scope=SymbolScope.METHODS,
+        ).reduce(workspace, file_result.baseline_signature)
+
+        content = (workspace.root / "module.py").read_text(encoding="utf-8")
+
+    assert result.candidate_attempts == 2
+    assert result.accepted_removals == 1
+    assert result.probe_records[0].candidate_descriptions == (
+        "module.py:Service.unused:2-4:method",
+    )
+    assert "def unused" not in content
+    assert "def required" in content
+    rejected = result.probe_records[1]
+    assert rejected.candidate_descriptions[0].startswith("module.py:Service.required:")
+    assert rejected.candidate_descriptions[0].endswith(":method")
+    assert not rejected.accepted
+    assert rejected.candidate_rolled_back
+    assert rejected.outcome is ReductionOutcome.DIFFERENT_FAILURE
+    assert rejected.failure_signature is not None
+    assert rejected.duration_seconds >= 0
+    ast.parse(content)
 
 
 def test_span_desc_order_prefers_larger_symbols_with_stable_tiebreakers():

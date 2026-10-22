@@ -1,4 +1,4 @@
-"""Discover and greedily remove complete Python source symbols."""
+"""Discover and greedily remove bounded Python source symbols."""
 
 from __future__ import annotations
 
@@ -39,12 +39,14 @@ from pyrepro.reproducer.workspace import ReductionWorkspace
 
 @dataclass(frozen=True)
 class SymbolCandidate:
-    """A complete module-level Python symbol represented by a source span.
+    """A supported Python symbol represented by a source span.
 
     Attributes:
         file_path: Workspace-relative source path containing the symbol.
-        qualified_name: Module-level symbol name.
-        kind: One of ``function``, ``async_function``, or ``class``.
+        qualified_name: Symbol name, qualified with its direct class name for
+            method candidates.
+        kind: One of ``function``, ``async_function``, ``class``, ``method``,
+            or ``async_method``.
         start_line: Inclusive first source line, including decorators.
         end_line: Inclusive final source line.
     """
@@ -71,6 +73,13 @@ class SymbolOrder(str, Enum):
 
     DISCOVERY = "discovery"
     SPAN_DESC = "span-desc"
+
+
+class SymbolScope(str, Enum):
+    """AST candidate domains supported by the concrete Symbol reducer."""
+
+    TOP_LEVEL = "top-level"
+    METHODS = "methods"
 
 
 @dataclass(frozen=True)
@@ -151,6 +160,8 @@ class GreedySymbolReducer:
         max_probes: Optional maximum number of symbol probes. ``None`` leaves
             the established Standard Mode behavior unbounded.
         candidate_order: Deterministic ordering used to choose the next symbol.
+        candidate_scope: AST domain used to discover candidates. ``METHODS`` is
+            intentionally limited to direct methods of module-level classes.
     """
 
     def __init__(
@@ -161,6 +172,7 @@ class GreedySymbolReducer:
         *,
         max_probes: int | None = None,
         candidate_order: SymbolOrder = SymbolOrder.DISCOVERY,
+        candidate_scope: SymbolScope = SymbolScope.TOP_LEVEL,
     ) -> None:
         """Initialize the P3 greedy symbol reducer."""
         if max_probes is not None and max_probes < 0:
@@ -170,6 +182,7 @@ class GreedySymbolReducer:
         self.ignored_directory_names = frozenset(ignored_directory_names)
         self.max_probes = max_probes
         self.candidate_order = candidate_order
+        self.candidate_scope = candidate_scope
 
     def reduce(
         self,
@@ -200,7 +213,7 @@ class GreedySymbolReducer:
         initial_files = _python_files(workspace.root, self.ignored_directory_names)
         initial_lines = _python_line_count(initial_files)
         initial_discovery, skipped_paths = _discover_workspace_symbols(
-            workspace.root, initial_files
+            workspace.root, initial_files, self.candidate_scope
         )
         initial_symbols = len(initial_discovery)
         rejected_identities: set[tuple[str, str, str]] = set()
@@ -214,7 +227,7 @@ class GreedySymbolReducer:
                 break
             current_files = _python_files(workspace.root, self.ignored_directory_names)
             candidates, skipped = _discover_workspace_symbols(
-                workspace.root, current_files
+                workspace.root, current_files, self.candidate_scope
             )
             skipped_paths.update(skipped)
             candidate = next(
@@ -260,7 +273,7 @@ class GreedySymbolReducer:
 
         remaining_files = _python_files(workspace.root, self.ignored_directory_names)
         remaining_symbols, skipped = _discover_workspace_symbols(
-            workspace.root, remaining_files
+            workspace.root, remaining_files, self.candidate_scope
         )
         skipped_paths.update(skipped)
         accepted_removals = sum(decision.removed for decision in decisions)
@@ -317,15 +330,27 @@ class GreedySymbolReducer:
                 candidate_python_lines=_python_line_count(
                     _python_files(probe_root, self.ignored_directory_names)
                 ),
+                candidate_descriptions=(
+                    f"{candidate.file_path}:{candidate.qualified_name}:"
+                    f"{candidate.start_line}-{candidate.end_line}:{candidate.kind}",
+                ),
+                candidate_rolled_back=outcome is not ReductionOutcome.SAME_FAILURE,
             )
 
 
-def discover_symbols(path: Path, workspace_root: Path) -> SymbolDiscovery:
-    """Return complete supported module-level symbols from one current source file.
+def discover_symbols(
+    path: Path,
+    workspace_root: Path,
+    candidate_scope: SymbolScope = SymbolScope.TOP_LEVEL,
+) -> SymbolDiscovery:
+    """Return supported current-source candidates from one eligible file.
 
     Args:
         path: Existing Python file in the current workspace.
         workspace_root: Root used to make candidate paths relative.
+        candidate_scope: Candidate domain. Methods are direct methods of
+            top-level classes only and are skipped if removal would empty the
+            enclosing class body.
 
     Returns:
         Parsed candidates, or a skipped discovery when parsing fails.
@@ -338,23 +363,31 @@ def discover_symbols(path: Path, workspace_root: Path) -> SymbolDiscovery:
 
     relative = path.relative_to(workspace_root).as_posix()
     candidates: list[SymbolCandidate] = []
-    for node in tree.body:
-        kind = _symbol_kind(node)
-        if kind is None or node.end_lineno is None:
-            continue
-        decorators = getattr(node, "decorator_list", ())
-        start_line = min(
-            (decorator.lineno for decorator in decorators), default=node.lineno
-        )
-        candidates.append(
-            SymbolCandidate(
-                file_path=relative,
-                qualified_name=node.name,
-                kind=kind,
-                start_line=start_line,
-                end_line=node.end_lineno,
-            )
-        )
+    if candidate_scope is SymbolScope.TOP_LEVEL:
+        for node in tree.body:
+            kind = _symbol_kind(node)
+            if kind is not None:
+                candidate = _candidate_from_node(relative, node, node.name, kind)
+                if candidate is not None:
+                    candidates.append(candidate)
+    elif candidate_scope is SymbolScope.METHODS:
+        for class_node in tree.body:
+            if not isinstance(class_node, ast.ClassDef):
+                continue
+            for method in class_node.body:
+                kind = _method_kind(method)
+                if kind is None or len(class_node.body) <= 1:
+                    continue
+                candidate = _candidate_from_node(
+                    relative,
+                    method,
+                    f"{class_node.name}.{method.name}",
+                    kind,
+                )
+                if candidate is not None:
+                    candidates.append(candidate)
+    else:
+        raise ValueError(f"unsupported symbol candidate scope: {candidate_scope}")
     return SymbolDiscovery(tuple(candidates), skipped=False)
 
 
@@ -387,12 +420,14 @@ def format_symbol_reduction_summary(result: SymbolReductionResult) -> str:
 
 
 def _discover_workspace_symbols(
-    workspace_root: Path, paths: Collection[Path]
+    workspace_root: Path,
+    paths: Collection[Path],
+    candidate_scope: SymbolScope,
 ) -> tuple[tuple[SymbolCandidate, ...], set[str]]:
     candidates: list[SymbolCandidate] = []
     skipped_paths: set[str] = set()
     for path in paths:
-        discovery = discover_symbols(path, workspace_root)
+        discovery = discover_symbols(path, workspace_root, candidate_scope)
         candidates.extend(discovery.candidates)
         if discovery.skipped:
             skipped_paths.add(path.relative_to(workspace_root).as_posix())
@@ -439,3 +474,32 @@ def _symbol_kind(node: ast.stmt) -> str | None:
     if isinstance(node, ast.ClassDef):
         return "class"
     return None
+
+
+def _method_kind(node: ast.stmt) -> str | None:
+    if isinstance(node, ast.FunctionDef):
+        return "method"
+    if isinstance(node, ast.AsyncFunctionDef):
+        return "async_method"
+    return None
+
+
+def _candidate_from_node(
+    file_path: str,
+    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef,
+    qualified_name: str,
+    kind: str,
+) -> SymbolCandidate | None:
+    """Build a candidate while retaining decorated source lines."""
+    if node.end_lineno is None:
+        return None
+    start_line = min(
+        (decorator.lineno for decorator in node.decorator_list), default=node.lineno
+    )
+    return SymbolCandidate(
+        file_path=file_path,
+        qualified_name=qualified_name,
+        kind=kind,
+        start_line=start_line,
+        end_line=node.end_lineno,
+    )

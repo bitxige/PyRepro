@@ -167,6 +167,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     reduce_parser.add_argument(
+        "--max-method-probes",
+        type=int,
+        default=0,
+        help=(
+            "bounded direct-class-method probes after Fast Mode symbol cleanup "
+            "(default: 0; zero disables)"
+        ),
+    )
+    reduce_parser.add_argument(
         "--symbol-order",
         choices=tuple(order.value for order in SymbolOrder),
         default=SymbolOrder.DISCOVERY.value,
@@ -310,6 +319,7 @@ def _reduce_fast(
             max_import_probes=args.max_import_probes,
             max_coarse_probes=args.max_coarse_probes,
             max_symbol_probes=args.max_symbol_probes,
+            max_method_probes=args.max_method_probes,
             symbol_order=SymbolOrder(args.symbol_order),
         )
         with ReductionWorkspace(source) as workspace:
@@ -365,8 +375,17 @@ def _validate_fast_arguments(
         parser.error("--max-coarse-probes must not be negative with --mode fast")
     if args.max_symbol_probes < 0:
         parser.error("--max-symbol-probes must not be negative with --mode fast")
-    if args.max_symbol_probes == 0 and args.symbol_order != SymbolOrder.DISCOVERY.value:
-        parser.error("--symbol-order requires --max-symbol-probes greater than zero")
+    if args.max_method_probes < 0:
+        parser.error("--max-method-probes must not be negative with --mode fast")
+    if (
+        args.max_symbol_probes == 0
+        and args.max_method_probes == 0
+        and args.symbol_order != SymbolOrder.DISCOVERY.value
+    ):
+        parser.error(
+            "--symbol-order requires --max-symbol-probes or "
+            "--max-method-probes greater than zero"
+        )
 
 
 def _print_fast_publication(
@@ -398,6 +417,13 @@ def _print_fast_publication(
             "Symbol probes: "
             f"{symbol_result.candidate_attempts} "
             f"({symbol_result.accepted_removals} accepted)"
+        )
+    if reduction.method_reduction is not None:
+        method_result = reduction.method_reduction
+        print(
+            "Method probes: "
+            f"{method_result.candidate_attempts} "
+            f"({method_result.accepted_removals} accepted)"
         )
 
 

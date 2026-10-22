@@ -576,11 +576,65 @@ def test_fast_mode_cli_optionally_runs_span_ordered_symbol_probes(
     assert status == 0
     assert "Final verification: 3/3 passed" in captured.out
     assert "Symbol probes: 1 (1 accepted)" in captured.out
+    assert "Method probes:" not in captured.out
     assert "removable_ballast" not in (output / "target.py").read_text(encoding="utf-8")
     records = [
         json.loads(line) for line in report.read_text(encoding="utf-8").splitlines()
     ]
     assert any(record["phase"] == "symbol" for record in records)
+
+
+def test_fast_mode_cli_optionally_runs_span_ordered_method_probes(
+    tmp_path: Path, capsys
+):
+    """Method probes are opt-in and retain Fast publisher verification."""
+    source = tmp_path / "source"
+    output = tmp_path / "verified-output"
+    report = tmp_path / "probes.jsonl"
+    _fast_method_project(source)
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--mode",
+            "fast",
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--max-oracle-executions",
+            "20",
+            "--max-coarse-probes",
+            "0",
+            "--max-method-probes",
+            "1",
+            "--symbol-order",
+            "span-desc",
+            "--probe-records",
+            str(report),
+            "--output",
+            str(output),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert "Final verification: 3/3 passed" in captured.out
+    assert "Method probes: 1 (1 accepted)" in captured.out
+    assert "def removable_ballast" not in (output / "target.py").read_text(
+        encoding="utf-8"
+    )
+    records = [
+        json.loads(line) for line in report.read_text(encoding="utf-8").splitlines()
+    ]
+    method_record = next(record for record in records if record["phase"] == "symbol")
+    assert method_record["candidate_details"] == [
+        "target.py:FailureService.removable_ballast:2-3:method"
+    ]
+    assert not method_record["candidate_rolled_back"]
 
 
 def test_fast_mode_cli_rejects_an_unused_symbol_order(tmp_path: Path, capsys):
@@ -607,7 +661,36 @@ def test_fast_mode_cli_rejects_an_unused_symbol_order(tmp_path: Path, capsys):
 
     captured = capsys.readouterr()
     assert error.value.code == 2
-    assert "--symbol-order requires --max-symbol-probes" in captured.err
+    assert "--symbol-order requires --max-symbol-probes or --max-method-probes" in (
+        captured.err
+    )
+
+
+def test_fast_mode_cli_rejects_negative_method_probe_limit(tmp_path: Path, capsys):
+    """Method probe bounds follow the same Fast-Mode validation contract."""
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "reduce",
+                str(tmp_path),
+                "--mode",
+                "fast",
+                "--pytest-node",
+                "tests/test_target.py::test_failure",
+                "--max-oracle-executions",
+                "6",
+                "--max-method-probes",
+                "-1",
+                "--",
+                sys.executable,
+                "-c",
+                "raise ValueError('failure')",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert error.value.code == 2
+    assert "--max-method-probes must not be negative" in captured.err
 
 
 def test_fast_mode_cli_leaves_existing_output_to_verified_publisher(
@@ -783,6 +866,34 @@ def _fast_symbol_project(root: Path) -> None:
         "from target import target_failure\n\n"
         "def test_failure() -> None:\n"
         "    target_failure()\n",
+    )
+    _write(
+        root,
+        "run_target.py",
+        "from tests.test_target import test_failure\ntest_failure()\n",
+    )
+
+
+def _fast_method_project(root: Path) -> None:
+    """Create a retained class with a removable direct method."""
+    _write(root, "tests/__init__.py", "")
+    _write(
+        root,
+        "target.py",
+        "class FailureService:\n"
+        "    def removable_ballast(self) -> int:\n"
+        "        return 1\n\n"
+        "    def target_failure(self) -> None:\n"
+        "        raise ValueError('target failure')\n\n"
+        "    def spare(self) -> None:\n"
+        "        pass\n",
+    )
+    _write(
+        root,
+        "tests/test_target.py",
+        "from target import FailureService\n\n"
+        "def test_failure() -> None:\n"
+        "    FailureService().target_failure()\n",
     )
     _write(
         root,
