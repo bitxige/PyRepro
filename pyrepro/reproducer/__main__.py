@@ -176,6 +176,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     reduce_parser.add_argument(
+        "--max-if-statement-probes",
+        type=int,
+        default=0,
+        help=(
+            "experimental bounded complete-if probes after Fast Mode method cleanup "
+            "(default: 0; zero disables)"
+        ),
+    )
+    reduce_parser.add_argument(
         "--symbol-order",
         choices=tuple(order.value for order in SymbolOrder),
         default=SymbolOrder.DISCOVERY.value,
@@ -320,6 +329,7 @@ def _reduce_fast(
             max_coarse_probes=args.max_coarse_probes,
             max_symbol_probes=args.max_symbol_probes,
             max_method_probes=args.max_method_probes,
+            max_if_statement_probes=args.max_if_statement_probes,
             symbol_order=SymbolOrder(args.symbol_order),
         )
         with ReductionWorkspace(source) as workspace:
@@ -377,6 +387,8 @@ def _validate_fast_arguments(
         parser.error("--max-symbol-probes must not be negative with --mode fast")
     if args.max_method_probes < 0:
         parser.error("--max-method-probes must not be negative with --mode fast")
+    if args.max_if_statement_probes < 0:
+        parser.error("--max-if-statement-probes must not be negative with --mode fast")
     if (
         args.max_symbol_probes == 0
         and args.max_method_probes == 0
@@ -424,6 +436,13 @@ def _print_fast_publication(
             "Method probes: "
             f"{method_result.candidate_attempts} "
             f"({method_result.accepted_removals} accepted)"
+        )
+    if reduction.if_statement_reduction is not None:
+        if_result = reduction.if_statement_reduction
+        print(
+            "If-statement probes: "
+            f"{if_result.candidate_attempts} "
+            f"({if_result.accepted_removals} accepted)"
         )
 
 

@@ -304,6 +304,37 @@ def test_pipeline_runs_method_stage_with_the_shared_budget(tmp_path: Path):
     assert tree_digest(tmp_path) == digest
 
 
+def test_pipeline_runs_complete_if_stage_with_the_shared_budget(tmp_path: Path):
+    """Experimental complete-if probes share budget and preserve rollbacks."""
+    _if_statement_project(tmp_path)
+    digest = tree_digest(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+    budget = ExecutionBudget(20)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = PreprocessingFirstReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            max_import_probes=1,
+            max_coarse_probes=0,
+            max_if_statement_probes=2,
+        ).reduce(workspace, budget=budget)
+
+        assert result.if_statement_reduction is not None
+        if_result = result.if_statement_reduction
+        assert if_result.candidate_attempts == 2
+        assert if_result.accepted_removals == 1
+        assert if_result.probe_records[0].candidate_rolled_back
+        assert if_result.probe_records[1].accepted
+        assert result.executions == budget.snapshot().executions_started
+        assert "ballast = 2" not in (workspace.root / "target.py").read_text(
+            encoding="utf-8"
+        )
+        assert "if_statement" in {record.phase for record in result.probe_records}
+
+    assert tree_digest(tmp_path) == digest
+
+
 def test_coarse_stops_before_split_when_global_budget_is_exhausted(tmp_path: Path):
     """A rejected group cannot consume extra split probes after its last slot."""
     _nested_project(tmp_path)
@@ -466,6 +497,33 @@ def _method_symbol_project(root: Path) -> None:
         "from target import FailureService\n\n"
         "def test_failure() -> None:\n"
         "    FailureService().target_failure()\n",
+    )
+    _write(
+        root,
+        "run_target.py",
+        "from tests.test_target import test_failure\ntest_failure()\n",
+    )
+
+
+def _if_statement_project(root: Path) -> None:
+    _write(root, "tests/__init__.py", "")
+    _write(
+        root,
+        "target.py",
+        "def target_failure() -> None:\n"
+        "    if True:\n"
+        "        required = 1\n"
+        "    if True:\n"
+        "        ballast = 2\n"
+        "    assert required == 1\n"
+        "    raise ValueError('target failure')\n",
+    )
+    _write(
+        root,
+        "tests/test_target.py",
+        "from target import target_failure\n\n"
+        "def test_failure() -> None:\n"
+        "    target_failure()\n",
     )
     _write(
         root,
