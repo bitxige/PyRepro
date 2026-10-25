@@ -24,8 +24,9 @@ argv reproduction command. It establishes a stable Python failure signature,
 works in a disposable copy, and verifies the same failure in the final output.
 It provides greedy and grouped file strategies, optional top-level symbol
 reduction, and an opt-in Fast Mode that composes import pruning, bounded coarse
-file reduction, greedy cleanup, optional complete-symbol and direct-method
-reduction, final staging verification, and safe output publication.
+file reduction, greedy cleanup, optional complete-symbol, direct-method, and
+complete-`if` reduction, final staging verification, and safe output
+publication.
 
 PyRepro runs the supplied command repeatedly. It does not install dependencies
 or modify the source project, but it is not an execution sandbox. Only use it
@@ -112,6 +113,7 @@ pyrepro reduce ~/my_project \
   --max-coarse-probes 16 \
   --max-symbol-probes 60 \
   --max-method-probes 60 \
+  --max-if-statement-probes 60 \
   --symbol-order span-desc \
   --output /tmp/reduced-example \
   -- python run_target.py
@@ -119,15 +121,20 @@ pyrepro reduce ~/my_project \
 
 `--mode fast` requires both `--pytest-node` and
 `--max-oracle-executions`. It supports greedy file cleanup and optional,
-default-disabled complete-symbol and direct-method stages.
-`--max-symbol-probes 0` and `--max-method-probes 0` disable their respective
-stages; positive values bound their probes. Method reduction is deliberately
-limited to direct methods of module-level classes and skips a sole method rather
-than creating an empty class body. `--symbol-order span-desc` probes larger
-source spans first, with stable path and source-position tiebreakers, for every
-enabled symbol stage. Both stages share the Fast Mode budget, strict Oracle,
-rollback, and final Publisher verification; neither uses
-`--max-granularity symbol`.
+default-disabled complete-symbol, direct-method, and complete-`if` stages.
+`--max-symbol-probes 0`, `--max-method-probes 0`, and
+`--max-if-statement-probes 0` disable their respective stages; positive values
+bound their probes. Method reduction is deliberately limited to direct methods
+of module-level classes and skips a sole method rather than creating an empty
+class body. Complete-`if` reduction considers only complete source `if`
+statements in top-level functions and direct methods. It excludes source
+`elif` nodes, nested definitions, module/class bodies, comments, and semicolon
+chains; it inserts `pass` only when removal would otherwise empty the direct
+parent suite. Its fixed span-descending order is advisory, not deletion
+permission. `--symbol-order span-desc` probes larger source spans first, with
+stable path and source-position tiebreakers, for every enabled symbol stage.
+All three stages share the Fast Mode budget, strict Oracle, rollback, and final
+Publisher verification; none uses `--max-granularity symbol`.
 `--strategy ddmin` and `--max-granularity symbol` remain rejected in Fast Mode,
 and `--max-coarse-probes 0` disables the optional coarse stage.
 

@@ -7,6 +7,14 @@ experiments remain available through Git history.
 
 ### Added
 
+- Added default-disabled Fast Mode complete-`if` reduction through
+  `--max-if-statement-probes`. It greedily probes whole ordinary source `if`
+  statements only inside top-level functions and direct methods, re-discovers
+  AST candidates after each accepted edit, preserves empty suites with `pass`,
+  and skips ambiguous comment or semicolon source ranges. The stage uses the
+  existing shared Oracle/time budget, strict failure oracle, rollback telemetry,
+  staging 3/3 verification, and no-clobber publication.
+
 - Added default-disabled Fast Mode direct-method reduction through
   `--max-method-probes`. It reuses the complete-symbol reducer only for direct
   methods of module-level classes, shares the existing Oracle/time budget and

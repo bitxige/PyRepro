@@ -9,8 +9,8 @@ user-specified runtime failure. Its central principle is:
 
 PyRepro implements execution-verified file reduction followed by optional
 source-symbol reduction. Its opt-in Fast Mode composes target-aware import
-pruning, bounded coarse deletion, greedy cleanup, optional complete-symbol and
-direct-method reduction, and verified publication:
+pruning, bounded coarse deletion, greedy cleanup, optional complete-symbol,
+direct-method, and complete-if reduction, and verified publication:
 
 ```text
 Trusted local project + argv reproduction command
@@ -38,7 +38,7 @@ pyrepro reduce <source> --mode fast --pytest-node FILE::[CLASS::]TEST
     --max-oracle-executions N -- <argv...>
                     |
                     v
-  shared baseline -> import pruning -> coarse groups -> greedy cleanup -> optional symbols -> optional methods
+  shared baseline -> import pruning -> coarse groups -> greedy cleanup -> optional symbols -> optional methods -> optional complete if
                     |
                     v
       sibling staging -> independent 3/3 -> atomic no-clobber publication
@@ -82,7 +82,8 @@ pyrepro/
 │   ├── budget.py               # Fast-Mode shared Oracle/time budget
 │   ├── publisher.py            # staging verification and verified publication
 │   ├── probe_report.py         # atomic opt-in JSONL probe telemetry
-│   └── symbol_reducer.py      # AST source spans and greedy symbol reduction
+│   ├── symbol_reducer.py      # AST source spans and greedy symbol reduction
+│   └── if_statement_reducer.py # bounded complete-if source reduction
 ├── scanner/
 │   ├── repository_scanner.py  # retained static repository inventory
 │   ├── ast_analyzer.py        # retained syntax-level facts
@@ -218,15 +219,20 @@ and their JSONL telemetry marks `candidate_rolled_back`.
 
 `PreprocessingFirstReducer` shares one workspace and baseline across verified
 import pruning, optional `CoarseFileReducer` directory-group probes,
-`GreedyFileReducer` cleanup, and optional complete-symbol then direct-method
-`GreedySymbolReducer` stages. Both are disabled by default and enabled only
-with positive `--max-symbol-probes` or `--max-method-probes` values;
-`--symbol-order span-desc` is a deterministic advisory ordering, not an
-acceptance rule. In Fast Mode, all Oracle invocations pass through one
-`ExecutionBudget`: it reserves three executions for final
-verification and uses a monotonic deadline to bound each command timeout. A
-budgeted pipeline does not repeat stage-final checks; it retains only
-individually accepted workspace changes.
+`GreedyFileReducer` cleanup, optional complete-symbol then direct-method
+`GreedySymbolReducer` stages, and optional `GreedyIfStatementReducer`
+complete-source-if probes. All three source stages are disabled by default and
+enabled only with positive `--max-symbol-probes`, `--max-method-probes`, or
+`--max-if-statement-probes` values. `--symbol-order span-desc` is a deterministic
+advisory ordering, not an acceptance rule. Complete-if probes use a fixed
+span-descending advisory order. They are limited to ordinary source `if`
+statements within top-level functions and direct methods; `elif`, nested
+definitions, module/class bodies, and comment/semicolon spans are skipped.
+Deleting a sole statement from its direct parent suite inserts `pass` to retain
+valid syntax. In Fast Mode, all Oracle invocations pass through one
+`ExecutionBudget`: it reserves three executions for final verification and uses
+a monotonic deadline to bound each command timeout. A budgeted pipeline does not
+repeat stage-final checks; it retains only individually accepted workspace changes.
 
 The CLI is an orchestration layer. It passes the final workspace and established
 signature to `verify_and_publish`, which creates sibling staging, runs the
