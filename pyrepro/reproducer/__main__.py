@@ -185,6 +185,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     reduce_parser.add_argument(
+        "--max-container-entry-probes",
+        type=int,
+        default=0,
+        help=(
+            "experimental bounded module-dictionary entry probes after Fast Mode "
+            "complete-if cleanup (default: 0; zero disables)"
+        ),
+    )
+    reduce_parser.add_argument(
         "--symbol-order",
         choices=tuple(order.value for order in SymbolOrder),
         default=SymbolOrder.DISCOVERY.value,
@@ -330,6 +339,7 @@ def _reduce_fast(
             max_symbol_probes=args.max_symbol_probes,
             max_method_probes=args.max_method_probes,
             max_if_statement_probes=args.max_if_statement_probes,
+            max_container_entry_probes=args.max_container_entry_probes,
             symbol_order=SymbolOrder(args.symbol_order),
         )
         with ReductionWorkspace(source) as workspace:
@@ -389,6 +399,10 @@ def _validate_fast_arguments(
         parser.error("--max-method-probes must not be negative with --mode fast")
     if args.max_if_statement_probes < 0:
         parser.error("--max-if-statement-probes must not be negative with --mode fast")
+    if args.max_container_entry_probes < 0:
+        parser.error(
+            "--max-container-entry-probes must not be negative with --mode fast"
+        )
     if (
         args.max_symbol_probes == 0
         and args.max_method_probes == 0
@@ -444,6 +458,14 @@ def _print_fast_publication(
             f"{if_result.candidate_attempts} "
             f"({if_result.accepted_removals} accepted)"
         )
+    if reduction.container_entry_reduction is not None:
+        container_result = reduction.container_entry_reduction
+        print(
+            "Container-entry probes: "
+            f"{container_result.candidate_attempts} "
+            f"({container_result.accepted_batches} accepted)"
+        )
+        print(f"Container entries removed: {container_result.removed_entries}")
 
 
 def _fast_state_message(publication: PublishingResult) -> str:

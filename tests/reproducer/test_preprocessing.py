@@ -335,6 +335,53 @@ def test_pipeline_runs_complete_if_stage_with_the_shared_budget(tmp_path: Path):
     assert tree_digest(tmp_path) == digest
 
 
+def test_pipeline_runs_container_entry_stage_with_the_shared_budget(tmp_path: Path):
+    """Container entry probes share the Fast budget and preserve rejections."""
+    _container_entry_project(tmp_path)
+    digest = tree_digest(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+    budget = ExecutionBudget(20)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = PreprocessingFirstReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            max_import_probes=1,
+            max_coarse_probes=0,
+            max_container_entry_probes=4,
+        ).reduce(workspace, budget=budget)
+
+        assert result.container_entry_reduction is not None
+        container = result.container_entry_reduction
+        assert container.candidate_attempts >= 2
+        assert container.removed_entries == 1
+        assert result.executions == budget.snapshot().executions_started
+        assert "'unused'" not in (workspace.root / "target.py").read_text(
+            encoding="utf-8"
+        )
+        assert "container_entry" in {record.phase for record in result.probe_records}
+
+    assert tree_digest(tmp_path) == digest
+
+
+def test_pipeline_default_keeps_container_entry_stage_disabled(tmp_path: Path):
+    """The new optional stage must not alter the existing Fast default flow."""
+    _container_entry_project(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+    budget = ExecutionBudget(20)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = PreprocessingFirstReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            max_import_probes=1,
+            max_coarse_probes=0,
+        ).reduce(workspace, budget=budget)
+
+        assert result.container_entry_reduction is None
+        assert "'unused'" in (workspace.root / "target.py").read_text(encoding="utf-8")
+
+
 def test_coarse_stops_before_split_when_global_budget_is_exhausted(tmp_path: Path):
     """A rejected group cannot consume extra split probes after its last slot."""
     _nested_project(tmp_path)
@@ -516,6 +563,33 @@ def _if_statement_project(root: Path) -> None:
         "    if True:\n"
         "        ballast = 2\n"
         "    assert required == 1\n"
+        "    raise ValueError('target failure')\n",
+    )
+    _write(
+        root,
+        "tests/test_target.py",
+        "from target import target_failure\n\n"
+        "def test_failure() -> None:\n"
+        "    target_failure()\n",
+    )
+    _write(
+        root,
+        "run_target.py",
+        "from tests.test_target import test_failure\ntest_failure()\n",
+    )
+
+
+def _container_entry_project(root: Path) -> None:
+    _write(root, "tests/__init__.py", "")
+    _write(
+        root,
+        "target.py",
+        "CODES = {\n"
+        "    'needed': 'present',\n"
+        "    'unused': 'ballast',\n"
+        "}\n\n"
+        "def target_failure() -> None:\n"
+        "    CODES['needed']\n"
         "    raise ValueError('target failure')\n",
     )
     _write(

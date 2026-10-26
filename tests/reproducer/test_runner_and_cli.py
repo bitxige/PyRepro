@@ -682,6 +682,79 @@ def test_fast_mode_cli_optionally_runs_complete_if_probes(tmp_path: Path, capsys
     assert if_record["candidate_rolled_back"]
 
 
+def test_fast_mode_cli_optionally_runs_container_entry_probes(tmp_path: Path, capsys):
+    """Container-entry probes retain Fast publisher verification and telemetry."""
+    source = tmp_path / "source"
+    output = tmp_path / "verified-output"
+    report = tmp_path / "probes.jsonl"
+    _fast_container_entry_project(source)
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--mode",
+            "fast",
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--max-oracle-executions",
+            "20",
+            "--max-coarse-probes",
+            "0",
+            "--max-container-entry-probes",
+            "4",
+            "--probe-records",
+            str(report),
+            "--output",
+            str(output),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert "Final verification: 3/3 passed" in captured.out
+    assert "Container-entry probes:" in captured.out
+    assert "Container entries removed: 1" in captured.out
+    assert "'unused'" not in (output / "target.py").read_text(encoding="utf-8")
+    records = [
+        json.loads(line) for line in report.read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(record["phase"] == "container_entry" for record in records)
+
+
+def test_fast_mode_cli_rejects_negative_container_entry_probe_limit(
+    tmp_path: Path, capsys
+):
+    """The optional container-entry stage follows Fast validation rules."""
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "reduce",
+                str(tmp_path),
+                "--mode",
+                "fast",
+                "--pytest-node",
+                "tests/test_target.py::test_failure",
+                "--max-oracle-executions",
+                "6",
+                "--max-container-entry-probes",
+                "-1",
+                "--",
+                sys.executable,
+                "-c",
+                "raise ValueError('failure')",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert error.value.code == 2
+    assert "--max-container-entry-probes must not be negative" in captured.err
+
+
 def test_fast_mode_cli_rejects_negative_complete_if_probe_limit(tmp_path: Path, capsys):
     """The experimental complete-if bound follows Fast validation rules."""
     with pytest.raises(SystemExit) as error:
@@ -986,6 +1059,34 @@ def _fast_if_statement_project(root: Path) -> None:
         "    if True:\n"
         "        ballast = 2\n"
         "    assert required == 1\n"
+        "    raise ValueError('target failure')\n",
+    )
+    _write(
+        root,
+        "tests/test_target.py",
+        "from target import target_failure\n\n"
+        "def test_failure() -> None:\n"
+        "    target_failure()\n",
+    )
+    _write(
+        root,
+        "run_target.py",
+        "from tests.test_target import test_failure\ntest_failure()\n",
+    )
+
+
+def _fast_container_entry_project(root: Path) -> None:
+    """Create a retained failure with one required dictionary entry."""
+    _write(root, "tests/__init__.py", "")
+    _write(
+        root,
+        "target.py",
+        "CODES = {\n"
+        "    'needed': 'present',\n"
+        "    'unused': 'ballast',\n"
+        "}\n\n"
+        "def target_failure() -> None:\n"
+        "    CODES['needed']\n"
         "    raise ValueError('target failure')\n",
     )
     _write(

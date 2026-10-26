@@ -7,6 +7,14 @@ experiments remain available through Git history.
 
 ### Added
 
+- Added default-disabled Fast Mode module-dictionary entry reduction through
+  `--max-container-entry-probes`. The conservative stage recognizes only
+  unambiguous multiline module dictionaries with string keys and static values,
+  probes whole entry batches before recursively splitting rejected batches, and
+  applies exact source-range edits rather than reformatting files. It shares
+  the existing Oracle/time budget, strict oracle, rollback telemetry, staging
+  3/3 verification, and no-clobber publication.
+
 - Added default-disabled Fast Mode complete-`if` reduction through
   `--max-if-statement-probes`. It greedily probes whole ordinary source `if`
   statements only inside top-level functions and direct methods, re-discovers

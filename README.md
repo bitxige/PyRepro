@@ -114,6 +114,7 @@ pyrepro reduce ~/my_project \
   --max-symbol-probes 60 \
   --max-method-probes 60 \
   --max-if-statement-probes 60 \
+  --max-container-entry-probes 60 \
   --symbol-order span-desc \
   --output /tmp/reduced-example \
   -- python run_target.py
@@ -121,19 +122,27 @@ pyrepro reduce ~/my_project \
 
 `--mode fast` requires both `--pytest-node` and
 `--max-oracle-executions`. It supports greedy file cleanup and optional,
-default-disabled complete-symbol, direct-method, and complete-`if` stages.
+default-disabled complete-symbol, direct-method, complete-`if`, and
+module-dictionary-entry stages.
 `--max-symbol-probes 0`, `--max-method-probes 0`, and
-`--max-if-statement-probes 0` disable their respective stages; positive values
-bound their probes. Method reduction is deliberately limited to direct methods
+`--max-if-statement-probes 0`, and `--max-container-entry-probes 0` disable
+their respective stages; positive values bound their probes. Method reduction
+is deliberately limited to direct methods
 of module-level classes and skips a sole method rather than creating an empty
 class body. Complete-`if` reduction considers only complete source `if`
 statements in top-level functions and direct methods. It excludes source
 `elif` nodes, nested definitions, module/class bodies, comments, and semicolon
 chains; it inserts `pass` only when removal would otherwise empty the direct
 parent suite. Its fixed span-descending order is advisory, not deletion
-permission. `--symbol-order span-desc` probes larger source spans first, with
+permission. Container-entry reduction runs after complete-if reduction. It
+only considers unambiguous multiline module-level dictionaries with string
+keys and either string literals or direct named constructor calls whose
+arguments are static literals. It skips comments, semicolon chains, duplicate
+or rebound bindings, unpacking, and dynamic values. It probes whole entry
+batches and recursively splits rejected batches; static facts never accept a
+deletion on their own. `--symbol-order span-desc` probes larger source spans first, with
 stable path and source-position tiebreakers, for every enabled symbol stage.
-All three stages share the Fast Mode budget, strict Oracle, rollback, and final
+All four stages share the Fast Mode budget, strict Oracle, rollback, and final
 Publisher verification; none uses `--max-granularity symbol`.
 `--strategy ddmin` and `--max-granularity symbol` remain rejected in Fast Mode,
 and `--max-coarse-probes 0` disables the optional coarse stage.
