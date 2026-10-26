@@ -382,6 +382,24 @@ def test_pipeline_default_keeps_container_entry_stage_disabled(tmp_path: Path):
         assert "'unused'" in (workspace.root / "target.py").read_text(encoding="utf-8")
 
 
+def test_pipeline_default_keeps_list_entry_stage_disabled(tmp_path: Path):
+    """The list stage must not alter the existing default Fast pipeline."""
+    _list_entry_project(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+    budget = ExecutionBudget(20)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = PreprocessingFirstReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            max_import_probes=1,
+            max_coarse_probes=0,
+        ).reduce(workspace, budget=budget)
+
+        assert result.list_entry_reduction is None
+        assert "(3, 4, 0)" in (workspace.root / "target.py").read_text(encoding="utf-8")
+
+
 def test_coarse_stops_before_split_when_global_budget_is_exhausted(tmp_path: Path):
     """A rejected group cannot consume extra split probes after its last slot."""
     _nested_project(tmp_path)
@@ -590,6 +608,33 @@ def _container_entry_project(root: Path) -> None:
         "}\n\n"
         "def target_failure() -> None:\n"
         "    CODES['needed']\n"
+        "    raise ValueError('target failure')\n",
+    )
+    _write(
+        root,
+        "tests/test_target.py",
+        "from target import target_failure\n\n"
+        "def test_failure() -> None:\n"
+        "    target_failure()\n",
+    )
+    _write(
+        root,
+        "run_target.py",
+        "from tests.test_target import test_failure\ntest_failure()\n",
+    )
+
+
+def _list_entry_project(root: Path) -> None:
+    _write(root, "tests/__init__.py", "")
+    _write(
+        root,
+        "target.py",
+        "CELL_WIDTHS = [\n"
+        "    (1, 2, -1),\n"
+        "    (3, 4, 0),\n"
+        "]\n\n"
+        "def target_failure() -> None:\n"
+        "    assert (1, 2, -1) in CELL_WIDTHS\n"
         "    raise ValueError('target failure')\n",
     )
     _write(

@@ -56,6 +56,14 @@ P3 在文件级缩减后的 workspace 中继续删除完整顶层 symbol：`func
 执行 oracle 决定删除是否接受。它分别记录 file/symbol phase 的执行次数和耗时，
 并且不处理 methods、statements 或 symbol-level ddmin。
 
+## 当前 Fast Mode 可选阶段
+
+Fast Mode 在同一个执行预算、严格故障 Oracle 和受保护发布流程下，按既定顺序
+组织 Import、可选 Coarse、Greedy 文件缩减，以及默认关闭的完整 Symbol、直接类
+方法、完整 `if`、模块级字典条目和模块级列表条目阶段。列表条目阶段仅处理
+可明确识别的多行模块级列表：元素必须是唯一的整数常量元组；它批量探测条目，
+并只在批量失败时递归拆分。静态结构只用于组织候选，任何删除仍须通过执行验证。
+
 P5.1 增加只读的通用静态导入分析：它识别 flat / `src` 布局、常规 package、
 测试模块、内部 import 和 package re-export，并输出可能在后续阶段被验证的候选与
 保守跳过原因。该阶段不执行用户命令、不创建工作副本、不修改 source，也不将静态

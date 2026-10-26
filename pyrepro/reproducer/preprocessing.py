@@ -18,6 +18,10 @@ from pyrepro.reproducer.if_statement_reducer import (
     IfStatementReductionResult,
 )
 from pyrepro.reproducer.import_pruner import BatchImportPruner, ImportPruningResult
+from pyrepro.reproducer.list_entry_reducer import (
+    GreedyListEntryReducer,
+    ListEntryReductionResult,
+)
 from pyrepro.reproducer.reducer import GreedyFileReducer, ProbeRecord, ReductionResult
 from pyrepro.reproducer.runner import CommandRunner
 from pyrepro.reproducer.symbol_reducer import (
@@ -40,6 +44,7 @@ class PreprocessingReductionResult:
     method_reduction: SymbolReductionResult | None
     if_statement_reduction: IfStatementReductionResult | None
     container_entry_reduction: ContainerEntryReductionResult | None
+    list_entry_reduction: ListEntryReductionResult | None
     executions: int
     wall_clock_seconds: float
     probe_records: tuple[ProbeRecord, ...]
@@ -68,6 +73,7 @@ class PreprocessingFirstReducer:
         max_method_probes: int = 0,
         max_if_statement_probes: int = 0,
         max_container_entry_probes: int = 0,
+        max_list_entry_probes: int = 0,
         symbol_order: SymbolOrder = SymbolOrder.DISCOVERY,
     ) -> None:
         """Configure the preprocessing-first reduction pipeline.
@@ -92,6 +98,9 @@ class PreprocessingFirstReducer:
             max_container_entry_probes: Bound for experimental static
                 module-dictionary entry probes after complete-if reduction.
                 Zero preserves the existing Fast Mode pipeline.
+            max_list_entry_probes: Bound for experimental static module-list
+                entry probes after module-dictionary reduction. Zero preserves
+                the existing Fast Mode pipeline.
             symbol_order: Deterministic order used only when symbol probes are
                 enabled.
         """
@@ -105,6 +114,7 @@ class PreprocessingFirstReducer:
         self.max_method_probes = max_method_probes
         self.max_if_statement_probes = max_if_statement_probes
         self.max_container_entry_probes = max_container_entry_probes
+        self.max_list_entry_probes = max_list_entry_probes
         self.symbol_order = symbol_order
 
     def reduce(
@@ -195,6 +205,18 @@ class PreprocessingFirstReducer:
                 budget=budget,
                 verify_final=budget is None,
             )
+        list_entry_result = None
+        if self.max_list_entry_probes:
+            list_entry_result = GreedyListEntryReducer(
+                self.runner,
+                match_mode=self.match_mode,
+                max_probes=self.max_list_entry_probes,
+            ).reduce(
+                workspace,
+                import_result.baseline_signature,
+                budget=budget,
+                verify_final=budget is None,
+            )
         return PreprocessingReductionResult(
             import_pruning=import_result,
             coarse_reduction=coarse_result,
@@ -203,6 +225,7 @@ class PreprocessingFirstReducer:
             method_reduction=method_result,
             if_statement_reduction=if_statement_result,
             container_entry_reduction=container_entry_result,
+            list_entry_reduction=list_entry_result,
             executions=(
                 import_result.executions
                 + (0 if coarse_result is None else coarse_result.executions)
@@ -215,6 +238,7 @@ class PreprocessingFirstReducer:
                     if container_entry_result is None
                     else container_entry_result.executions
                 )
+                + (0 if list_entry_result is None else list_entry_result.executions)
             ),
             wall_clock_seconds=perf_counter() - started,
             probe_records=(
@@ -233,6 +257,7 @@ class PreprocessingFirstReducer:
                     if container_entry_result is None
                     else container_entry_result.probe_records
                 )
+                + (() if list_entry_result is None else list_entry_result.probe_records)
             ),
             source_unchanged=(
                 import_result.source_unchanged
@@ -246,6 +271,7 @@ class PreprocessingFirstReducer:
                     container_entry_result is None
                     or container_entry_result.source_unchanged
                 )
+                and (list_entry_result is None or list_entry_result.source_unchanged)
             ),
             budget_exhausted=(
                 import_result.budget_exhausted
@@ -260,6 +286,9 @@ class PreprocessingFirstReducer:
                 or (
                     container_entry_result is not None
                     and container_entry_result.budget_exhausted
+                )
+                or (
+                    list_entry_result is not None and list_entry_result.budget_exhausted
                 )
             ),
         )

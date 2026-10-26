@@ -115,6 +115,7 @@ pyrepro reduce ~/my_project \
   --max-method-probes 60 \
   --max-if-statement-probes 60 \
   --max-container-entry-probes 60 \
+  --max-list-entry-probes 60 \
   --symbol-order span-desc \
   --output /tmp/reduced-example \
   -- python run_target.py
@@ -122,10 +123,11 @@ pyrepro reduce ~/my_project \
 
 `--mode fast` requires both `--pytest-node` and
 `--max-oracle-executions`. It supports greedy file cleanup and optional,
-default-disabled complete-symbol, direct-method, complete-`if`, and
-module-dictionary-entry stages.
+default-disabled complete-symbol, direct-method, complete-`if`,
+module-dictionary-entry, and module-list-entry stages.
 `--max-symbol-probes 0`, `--max-method-probes 0`, and
-`--max-if-statement-probes 0`, and `--max-container-entry-probes 0` disable
+`--max-if-statement-probes 0`, `--max-container-entry-probes 0`, and
+`--max-list-entry-probes 0` disable
 their respective stages; positive values bound their probes. Method reduction
 is deliberately limited to direct methods
 of module-level classes and skips a sole method rather than creating an empty
@@ -140,10 +142,16 @@ keys and either string literals or direct named constructor calls whose
 arguments are static literals. It skips comments, semicolon chains, duplicate
 or rebound bindings, unpacking, and dynamic values. It probes whole entry
 batches and recursively splits rejected batches; static facts never accept a
-deletion on their own. `--symbol-order span-desc` probes larger source spans first, with
-stable path and source-position tiebreakers, for every enabled symbol stage.
-All four stages share the Fast Mode budget, strict Oracle, rollback, and final
-Publisher verification; none uses `--max-granularity symbol`.
+deletion on their own. List-entry reduction runs after module-dictionary
+reduction. It only considers unambiguous multiline module-level lists whose
+unique entries are tuples of integer literals. It skips comments, semicolon
+chains, duplicate or rebound bindings, dynamic items, and all other list
+shapes. It probes whole entry batches and recursively splits rejected batches;
+static facts never accept a deletion on their own. `--symbol-order span-desc`
+probes larger source spans first, with stable path and source-position
+tiebreakers, for every enabled symbol stage. All five stages share the Fast
+Mode budget, strict Oracle, rollback, and final Publisher verification; none
+uses `--max-granularity symbol`.
 `--strategy ddmin` and `--max-granularity symbol` remain rejected in Fast Mode,
 and `--max-coarse-probes 0` disables the optional coarse stage.
 

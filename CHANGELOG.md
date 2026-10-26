@@ -7,6 +7,14 @@ experiments remain available through Git history.
 
 ### Added
 
+- Added default-disabled Fast Mode module-list entry reduction through
+  `--max-list-entry-probes`. The conservative stage recognizes only
+  unambiguous multiline module-level lists with unique integer-tuple entries,
+  probes whole batches before recursively splitting rejected batches, and uses
+  exact source-range edits. It shares the existing Oracle/time budget, strict
+  oracle, rollback telemetry, staging 3/3 verification, and no-clobber
+  publication.
+
 - Added default-disabled Fast Mode module-dictionary entry reduction through
   `--max-container-entry-probes`. The conservative stage recognizes only
   unambiguous multiline module dictionaries with string keys and static values,

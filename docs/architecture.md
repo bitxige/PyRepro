@@ -254,6 +254,21 @@ P3 reports file-phase and symbol-phase oracle execution counts and wall-clock
 durations separately, as well as symbol counts, symbol probe outcomes, and
 unparsable files skipped during discovery.
 
+### Fast Mode optional source stages
+
+The current Fast Mode pipeline composes import pruning, optional coarse file
+probes, greedy file cleanup, and default-disabled source stages under one
+`ExecutionBudget`. Complete-symbol, direct-method, complete-`if`, static
+dictionary-entry, and static list-entry stages all share the strict failure
+oracle, disposable probe workspaces, rollback telemetry, and Publisher-owned
+staging 3/3 verification.
+
+The list-entry stage runs after dictionary-entry reduction. It only considers
+unambiguous multiline module-level lists whose unique items are tuples of
+integer literals. It uses exact source-range edits, probes whole batches, and
+recursively splits a rejected batch. It does not infer that static data is
+removable: the existing runtime oracle remains the only acceptance authority.
+
 ## Retained static-analysis foundation
 
 `RepositoryScanner`, `AstAnalyzer`, `ImportAnalyzer`, and `path_utils` provide
