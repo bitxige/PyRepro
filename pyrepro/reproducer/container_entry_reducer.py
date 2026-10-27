@@ -1,7 +1,8 @@
 """Execution-verified reduction of entries in conservative module dictionaries.
 
 The reducer deliberately handles only a narrow source form: one multiline,
-module-level dictionary bound to one name, with string keys and static values.
+module-level dictionary bound to one name, with string keys and conservative
+static values.
 It uses exact byte-range edits rather than reformatting the module with
 ``ast.unparse``. Static structure finds candidates; the established runtime
 failure oracle remains the sole acceptance authority.
@@ -435,9 +436,15 @@ def _is_static_value(node: ast.expr) -> bool:
 
 
 def _is_supported_entry_value(node: ast.expr) -> bool:
-    """Recognize the deliberately narrow first-version dictionary values."""
+    """Recognize conservative supported dictionary values.
+
+    Direct constants are limited to ``str`` and exact ``int`` instances.
+    In particular, ``bool`` is intentionally excluded even though it is an
+    ``int`` subclass. Other static-value recognition remains limited to direct
+    name calls whose arguments are static.
+    """
     if isinstance(node, ast.Constant):
-        return isinstance(node.value, str)
+        return isinstance(node.value, str) or type(node.value) is int
     return (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)

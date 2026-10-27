@@ -12,6 +12,10 @@ experiments remain available through Git history.
 
 ### Added
 
+- Extended default-disabled Fast Mode module-dictionary entry reduction to
+  recognize direct integer values for string-keyed dictionaries. Booleans and
+  other constant types remain conservatively excluded.
+
 - Added default-disabled Fast Mode module-list entry reduction through
   `--max-list-entry-probes`. The conservative stage recognizes only
   unambiguous multiline module-level lists with unique integer-tuple entries,

@@ -138,7 +138,8 @@ chains; it inserts `pass` only when removal would otherwise empty the direct
 parent suite. Its fixed span-descending order is advisory, not deletion
 permission. Container-entry reduction runs after complete-if reduction. It
 only considers unambiguous multiline module-level dictionaries with string
-keys and either string literals or direct named constructor calls whose
+keys and either string or integer literals (excluding booleans), or direct named
+constructor calls whose
 arguments are static literals. It skips comments, semicolon chains, duplicate
 or rebound bindings, unpacking, and dynamic values. It probes whole entry
 batches and recursively splits rejected batches; static facts never accept a
