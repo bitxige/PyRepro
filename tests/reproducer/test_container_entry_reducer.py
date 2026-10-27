@@ -34,6 +34,7 @@ def test_discovery_supports_static_strings_integers_and_direct_static_constructo
         "NUMBERS = {\n    'one': 1,\n    'two': 2,\n}\n"
         "BOOLEAN = {\n    'no': False,\n}\n"
         "FLOATS = {\n    'half': 0.5,\n}\n"
+        "COMPUTED = {\n    'sum': 1 + 2,\n}\n"
         "COMMENTED = {\n    # keep\n    'x': 'y',\n}\n"
         "SEMICOLON = {'x': 'y'}; OTHER = 1\n"
         "prefix, REBOUND = ('old', 'old')\n"
@@ -49,6 +50,7 @@ def test_discovery_supports_static_strings_integers_and_direct_static_constructo
         ("SPECS", ("solid",)),
         ("NUMBERS", ("one", "two")),
     ]
+    assert all(item.container_name != "COMPUTED" for item in discovered.containers)
 
 
 def test_removal_preserves_crlf_binding_and_parsable_source(tmp_path: Path):
