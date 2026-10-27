@@ -83,6 +83,7 @@ pyrepro/
 │   ├── budget.py               # Fast-Mode shared Oracle/time budget
 │   ├── publisher.py            # staging verification and verified publication
 │   ├── probe_report.py         # atomic opt-in JSONL probe telemetry
+│   ├── result_report.py        # optional final JSON/HTML result reports
 │   ├── symbol_reducer.py      # AST source spans and greedy symbol reduction
 │   ├── if_statement_reducer.py # bounded complete-if source reduction
 │   └── container_entry_reducer.py # bounded module-dictionary entry reduction
@@ -249,6 +250,13 @@ independent final 3/3 there, and atomically publishes only on success. Linux
 publication requires `renameat2(RENAME_NOREPLACE)`; there is no unsafe rename
 fallback. The publisher owns output no-clobber and source-integrity rules; the
 CLI maps its structured terminal states to user-facing output and exit status.
+
+Optional final result reports are a presentation layer over completed reducer
+and Publisher data. `--json-report` and `--html-report` write separate,
+new files outside the protected source root; they do not replace JSONL probe
+telemetry or influence Oracle decisions. Both formats use one structured report
+mapping. A Fast Mode report distinguishes the accepted candidate workspace from
+an official published output and records unpublished terminal states truthfully.
 
 P3 reports file-phase and symbol-phase oracle execution counts and wall-clock
 durations separately, as well as symbol counts, symbol probe outcomes, and
