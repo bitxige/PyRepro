@@ -777,6 +777,7 @@ def test_fast_mode_cli_leaves_list_entry_reduction_disabled_by_default(
     source = tmp_path / "source"
     output = tmp_path / "verified-output"
     _fast_list_entry_project(source)
+    source_digest = tree_digest(source)
 
     status = main(
         [
@@ -804,6 +805,7 @@ def test_fast_mode_cli_leaves_list_entry_reduction_disabled_by_default(
     assert "Final verification: 3/3 passed" in captured.out
     assert "List-entry probes:" not in captured.out
     assert "(3, 4, 0)" in (output / "target.py").read_text(encoding="utf-8")
+    assert tree_digest(source) == source_digest
 
 
 def test_fast_mode_cli_rejects_negative_container_entry_probe_limit(
