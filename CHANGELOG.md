@@ -5,6 +5,11 @@ experiments remain available through Git history.
 
 ## [Unreleased]
 
+### Changed
+
+- Expanded the GitHub Actions test matrix to cover CPython 3.10, 3.11, and
+  3.12.
+
 ### Added
 
 - Added default-disabled Fast Mode module-list entry reduction through
