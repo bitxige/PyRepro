@@ -400,6 +400,46 @@ def test_pipeline_default_keeps_list_entry_stage_disabled(tmp_path: Path):
         assert "(3, 4, 0)" in (workspace.root / "target.py").read_text(encoding="utf-8")
 
 
+def test_optional_stages_share_the_last_available_search_slots(tmp_path: Path):
+    """A later list stage cannot exceed the budget spent by earlier stages."""
+    _symbol_and_list_project(tmp_path)
+    digest = tree_digest(tmp_path)
+    runner = CommandRunner(
+        [
+            sys.executable,
+            "-c",
+            "import target; target.target_failure()",
+        ],
+        timeout_seconds=2,
+    )
+    budget = ExecutionBudget(9)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = PreprocessingFirstReducer(
+            runner,
+            "target.py::target_failure",
+            max_import_probes=1,
+            max_coarse_probes=0,
+            max_symbol_probes=1,
+            max_list_entry_probes=8,
+        ).reduce(workspace, budget=budget)
+
+        assert result.symbol_reduction is not None
+        assert result.symbol_reduction.candidate_attempts == 1
+        assert result.symbol_reduction.accepted_removals == 1
+        assert result.list_entry_reduction is not None
+        assert result.list_entry_reduction.candidate_attempts == 1
+        assert result.list_entry_reduction.budget_exhausted
+        assert result.list_entry_reduction.removed_entries == 0
+        assert result.budget_exhausted
+        assert result.executions == budget.snapshot().executions_started == 6
+        content = (workspace.root / "target.py").read_text(encoding="utf-8")
+        assert "def removable_ballast" not in content
+        assert "(3, 4, 0)" in content
+
+    assert tree_digest(tmp_path) == digest
+
+
 def test_coarse_stops_before_split_when_global_budget_is_exhausted(tmp_path: Path):
     """A rejected group cannot consume extra split probes after its last slot."""
     _nested_project(tmp_path)
@@ -648,6 +688,23 @@ def _list_entry_project(root: Path) -> None:
         root,
         "run_target.py",
         "from tests.test_target import test_failure\ntest_failure()\n",
+    )
+
+
+def _symbol_and_list_project(root: Path) -> None:
+    """Create one module with independent symbol and list-stage candidates."""
+    _write(
+        root,
+        "target.py",
+        "CELL_WIDTHS = [\n"
+        "    (1, 2, -1),\n"
+        "    (3, 4, 0),\n"
+        "]\n\n"
+        "def removable_ballast() -> int:\n"
+        "    return 1\n\n"
+        "def target_failure() -> None:\n"
+        "    assert (1, 2, -1) in CELL_WIDTHS\n"
+        "    raise ValueError('target failure')\n",
     )
 
 
