@@ -16,7 +16,7 @@ from pyrepro.reproducer.runner import CommandRunner
 from pyrepro.reproducer.workspace import ReductionWorkspace, tree_digest
 
 
-def test_discovery_supports_static_strings_and_direct_static_constructor(
+def test_discovery_supports_static_strings_integers_and_direct_static_constructor(
     tmp_path: Path,
 ):
     """Only supported module dictionaries become candidates."""
@@ -31,7 +31,10 @@ def test_discovery_supports_static_strings_and_direct_static_constructor(
         "    'solid': MarkingSpec('solid', ('white', 1)),\n"
         "}\n"
         "DYNAMIC = {'nope': factory()}\n"
-        "NUMBERS = {\n    'one': 1,\n}\n"
+        "NUMBERS = {\n    'one': 1,\n    'two': 2,\n}\n"
+        "BOOLEAN = {\n    'no': False,\n}\n"
+        "FLOATS = {\n    'half': 0.5,\n}\n"
+        "COMPUTED = {\n    'sum': 1 + 2,\n}\n"
         "COMMENTED = {\n    # keep\n    'x': 'y',\n}\n"
         "SEMICOLON = {'x': 'y'}; OTHER = 1\n"
         "prefix, REBOUND = ('old', 'old')\n"
@@ -45,27 +48,28 @@ def test_discovery_supports_static_strings_and_direct_static_constructor(
     assert [(item.container_name, item.keys) for item in discovered.containers] == [
         ("CODES", ("中文", "plain")),
         ("SPECS", ("solid",)),
+        ("NUMBERS", ("one", "two")),
     ]
+    assert all(item.container_name != "COMPUTED" for item in discovered.containers)
 
 
-def test_removal_preserves_crlf_utf8_and_parsable_source(tmp_path: Path):
+def test_removal_preserves_crlf_binding_and_parsable_source(tmp_path: Path):
     """Exact byte edits retain CRLF while removing selected dictionary entries."""
     source = tmp_path / "data.py"
     source.write_bytes(
-        (
-            "CODES = {\r\n"
-            "    '中文': 'value',\r\n"
-            "    'keep': 'yes',\r\n"
-            "}\r\n"
-            "OTHER = {'unchanged': 1}\r\n"
-        ).encode()
+        b"ANSI_COLOR_NAMES = {\r\n"
+        b"    'black': 0,\r\n"
+        b"    'keep': 1,\r\n"
+        b"}\r\n"
+        b"OTHER = {'unchanged': 1}\r\n"
     )
 
-    _remove_entries(source, "CODES", ("中文",))
+    _remove_entries(source, "ANSI_COLOR_NAMES", ("black",))
 
     data = source.read_bytes()
-    assert "中文".encode() not in data
-    assert b"'keep': 'yes'" in data
+    assert b"'black': 0" not in data
+    assert b"ANSI_COLOR_NAMES = {" in data
+    assert b"'keep': 1" in data
     assert b"OTHER = {'unchanged': 1}" in data
     assert b"\n" not in data.replace(b"\r\n", b"")
     ast.parse(data.decode("utf-8"))
@@ -76,24 +80,18 @@ def test_batch_split_keeps_required_entry_and_rolls_back_rejections(tmp_path: Pa
     project = tmp_path / "project"
     project.mkdir()
     (project / "config.py").write_text(
-        """class MarkingSpec:
-    def __init__(self, name, value):
-        self.name = name
-        self.value = value
-
-
-SPECS = {
-    'solid': MarkingSpec('solid', ('white', 1)),
-    'dashed': MarkingSpec('dashed', ('yellow', 2)),
-    'double': MarkingSpec('double', ('blue', 3)),
+        """ANSI_COLOR_NAMES = {
+    'solid': 1,
+    'dashed': 2,
+    'double': 3,
 }
 """,
         encoding="utf-8",
     )
     (project / "reproduce.py").write_text(
-        """from config import SPECS
+        """from config import ANSI_COLOR_NAMES
 
-SPECS['solid']
+ANSI_COLOR_NAMES['solid']
 raise ValueError('container reduction failure')
 """,
         encoding="utf-8",
@@ -115,6 +113,7 @@ raise ValueError('container reduction failure')
     assert "'solid'" in content
     assert "'dashed'" not in content
     assert "'double'" not in content
+    assert "ANSI_COLOR_NAMES = {" in content
     assert any(record.candidate_rolled_back for record in result.probe_records)
     assert result.source_unchanged
     assert tree_digest(project) == source_digest

@@ -12,6 +12,10 @@ experiments remain available through Git history.
 
 ### Added
 
+- Extended default-disabled Fast Mode module-dictionary entry reduction to
+  recognize direct integer values for string-keyed dictionaries. Booleans and
+  other constant types remain conservatively excluded.
+
 - Added optional final JSON and HTML reduction reports through `--json-report`
   and `--html-report`. Both formats share one truthful result schema covering
   size, Oracle and stage metrics, source integrity, verification, and
