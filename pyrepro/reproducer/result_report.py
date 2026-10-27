@@ -5,6 +5,10 @@ and the Publisher already produced.  They never participate in candidate
 selection or acceptance decisions.
 """
 
+# ruff: noqa: E501
+# The self-contained HTML/CSS template intentionally retains long literal lines
+# so report source stays readable as a document rather than fragmented pieces.
+
 from __future__ import annotations
 
 import html
@@ -229,77 +233,168 @@ def write_reports(
 
 
 def render_html(report: Mapping[str, object]) -> str:
-    """Render one report mapping as a small, escaped standalone HTML page."""
+    """Render one accessible, self-contained HTML view of a report mapping.
+
+    The JSON report remains the source of truth. This renderer only formats
+    available values, labels missing values consistently, and escapes every
+    report-supplied text value before it reaches the document.
+    """
     title = "PyRepro reduction report"
     size = _mapping(report.get("size"))
     status = _mapping(report.get("status"))
     oracle = _mapping(report.get("oracle"))
+    timing = _mapping(report.get("timing"))
     verification = _mapping(report.get("final_verification"))
+    budget = _mapping(oracle.get("budget"))
+    stages = _mappings(report.get("stages"))
+    input_size = _mapping(size.get("input"))
+    candidate_size = _mapping(size.get("candidate"))
+    published_size = _mapping(size.get("published_output"))
+    displayed_output = published_size or candidate_size
+    status_class, status_label = _report_status(status)
+    loc_ratio = _as_number(size.get("loc_reduction_ratio"))
+    max_stage_loc = max(
+        (_as_number(stage.get("loc_removed")) or 0.0 for stage in stages),
+        default=0.0,
+    )
+    stage_rows = "\n".join(_stage_row(stage, max_stage_loc) for stage in stages)
+    ratio_percent = _percent(loc_ratio)
+    progress_width = _progress_width(loc_ratio)
+    verification_runs = _verification_runs(verification)
+    completed_runs = _html_value(verification.get("completed_runs"))
     terminal_state = _html_value(status.get("terminal_state"))
-    source_unchanged = _html_value(status.get("source_unchanged"))
-    total_executions = _html_value(oracle.get("total_executions"))
-    verification_runs = (
-        f"{_html_value(verification.get('same_failure_runs'))}/"
-        f"{_html_value(verification.get('required_runs'))} same-failure runs"
-    )
-    rows = "\n".join(
-        _html_row(
-            _text(stage.get("name")),
-            _text(stage.get("candidate_attempts")),
-            _text(stage.get("accepted")),
-            _text(stage.get("rejected")),
-            _text(stage.get("loc_removed")),
-        )
-        for stage in _mappings(report.get("stages"))
-    )
+    error_message = _html_value(status.get("error_message"))
     return "\n".join(
         (
             "<!doctype html>",
             '<html lang="en">',
             "<head>",
             '  <meta charset="utf-8">',
+            '  <meta name="viewport" content="width=device-width, initial-scale=1">',
             f"  <title>{html.escape(title)}</title>",
-            "  <style>body{font-family:sans-serif;max-width:960px;margin:2rem auto;"
-            "padding:0 1rem}table{border-collapse:collapse;width:100%}"
-            "th,td{border:1px solid #bbb;padding:.45rem;text-align:left}"
-            "th{background:#f4f4f4}.status{font-weight:bold}</style>",
+            "  <style>",
+            _REPORT_STYLES,
+            "  </style>",
             "</head>",
             "<body>",
-            f"  <h1>{html.escape(title)}</h1>",
-            f"  <p>Schema version: {_html_value(report.get('schema_version'))}</p>",
-            f"  <p>Mode: {_html_value(report.get('mode'))}; strategy: "
-            f"{_html_value(report.get('strategy'))}</p>",
-            "  <h2>Result</h2>",
-            "  <ul>",
-            _html_list_item(
-                "Terminal state", f'<span class="status">{terminal_state}</span>'
+            "  <main>",
+            '    <header class="report-header">',
+            "      <div>",
+            '        <p class="eyebrow">PyRepro · reduction report</p>',
+            f"        <h1>{html.escape(title)}</h1>",
+            '        <p class="subtitle">'
+            f"Schema v{_html_value(report.get('schema_version'))} · "
+            f"{_html_value(report.get('mode'))} mode · "
+            f"{_html_value(report.get('strategy'))} strategy</p>",
+            "      </div>",
+            f'      <p class="status-badge {status_class}">{status_label}</p>',
+            "    </header>",
+            '    <section aria-labelledby="metrics-heading">',
+            '      <h2 id="metrics-heading">Reduction at a glance</h2>',
+            '      <div class="metric-grid">',
+            _metric_card("LOC reduction", ratio_percent, "of input Python LOC removed"),
+            _metric_card(
+                "LOC removed",
+                _html_value(size.get("loc_removed")),
+                "net physical lines",
             ),
-            _html_list_item("Verified", _html_value(status.get("verified"))),
-            _html_list_item("Published", _html_value(status.get("published"))),
-            _html_list_item("Source unchanged", source_unchanged),
-            _html_list_item("Output path", _html_value(status.get("output_path"))),
-            _html_list_item("Error", _html_value(status.get("error_message"))),
-            "  </ul>",
-            "  <h2>Size</h2>",
-            "  <table><thead><tr><th>Artifact</th><th>Python files</th>"
-            "<th>LOC</th></tr></thead><tbody>",
-            _size_row("Input", _mapping(size.get("input"))),
-            _size_row("Accepted candidate", _mapping(size.get("candidate"))),
-            _size_row("Published output", _mapping(size.get("published_output"))),
-            "  </tbody></table>",
-            "  <p>LOC removed: "
-            f"{_html_value(size.get('loc_removed'))}; reduction rate: "
-            f"{_html_value(size.get('loc_reduction_ratio'))}</p>",
-            "  <h2>Oracle and verification</h2>",
-            "  <ul>",
-            _html_list_item("Total Oracle executions", total_executions),
-            _html_list_item("Final verification", verification_runs),
-            "  </ul>",
-            "  <h2>Reduction stages</h2>",
-            "  <table><thead><tr><th>Stage</th><th>Probes</th><th>Accepted</th>"
-            "<th>Rejected</th><th>LOC removed</th></tr></thead><tbody>",
-            rows or '    <tr><td colspan="5">No stage data available.</td></tr>',
-            "  </tbody></table>",
+            _metric_card(
+                "Python files",
+                f"{_html_value(input_size.get('python_files'))} → "
+                f"{_html_value(displayed_output.get('python_files'))}",
+                "input to reported output",
+            ),
+            _metric_card(
+                "Oracle executions",
+                _html_value(oracle.get("total_executions")),
+                "all recorded command executions",
+            ),
+            _metric_card(
+                "End-to-end runtime",
+                _duration(timing.get("run_wall_clock_seconds")),
+                "including final verification",
+            ),
+            "      </div>",
+            "    </section>",
+            '    <section class="panel" aria-labelledby="comparison-heading">',
+            '      <div class="section-heading">',
+            "        <div>",
+            '          <p class="eyebrow">Size comparison</p>',
+            '          <h2 id="comparison-heading">From input to result</h2>',
+            "        </div>",
+            f"        <strong>{ratio_percent} LOC reduction</strong>",
+            "      </div>",
+            '      <div class="comparison-grid">',
+            _size_card("Input", input_size),
+            _size_card("Accepted candidate", candidate_size),
+            _size_card("Published output", published_size),
+            "      </div>",
+            '      <div class="progress-label"><span>LOC reduction</span>'
+            f"<span>{ratio_percent}</span></div>",
+            '      <div class="progress-track" role="progressbar" '
+            'aria-label="Python LOC reduction" '
+            f'aria-valuemin="0" aria-valuemax="100" aria-valuenow="{progress_width}">'
+            f'<span style="width:{progress_width}%"></span></div>',
+            "    </section>",
+            '    <section class="status-grid" aria-label="Verification and safety">',
+            _status_card(
+                "Final verification",
+                verification_runs,
+                f"{completed_runs} completed run(s); passed: "
+                f"{_html_value(verification.get('passed'))}",
+            ),
+            _status_card(
+                "Source integrity",
+                _html_value(status.get("source_unchanged")),
+                "protected input repository remained unchanged",
+            ),
+            _status_card(
+                "Publication",
+                _html_value(status.get("published")),
+                "official output is created only after verification",
+            ),
+            "    </section>",
+            '    <section class="panel" aria-labelledby="stages-heading">',
+            '      <div class="section-heading">',
+            "        <div>",
+            '          <p class="eyebrow">Execution evidence</p>',
+            '          <h2 id="stages-heading">Reduction stages</h2>',
+            "        </div>",
+            '        <p class="muted">Stage bars compare only recorded LOC removal.</p>',
+            "      </div>",
+            '      <div class="table-wrap">',
+            "        <table>",
+            "          <thead><tr><th>Stage</th><th>Candidate probes</th>"
+            "<th>Accepted</th><th>Rejected</th><th>Oracle executions</th>"
+            "<th>LOC removed</th></tr></thead>",
+            "          <tbody>",
+            stage_rows
+            or '            <tr><td colspan="6">No stage data available.</td></tr>',
+            "          </tbody>",
+            "        </table>",
+            "      </div>",
+            "    </section>",
+            f'    <details class="details"{" open" if status.get("error_message") is not None else ""}>',
+            "      <summary>Execution details</summary>",
+            "      <dl>",
+            _detail_row("Terminal state", terminal_state),
+            _detail_row("Output path", _html_value(status.get("output_path"))),
+            _detail_row(
+                "Reduction runtime",
+                _duration(timing.get("reduction_wall_clock_seconds")),
+            ),
+            _detail_row("Budget maximum", _html_value(budget.get("max_executions"))),
+            _detail_row(
+                "Budget remaining", _html_value(budget.get("remaining_executions"))
+            ),
+            _detail_row(
+                "Search budget exhausted",
+                _html_value(status.get("search_budget_exhausted")),
+            ),
+            _detail_row("Error", error_message),
+            "      </dl>",
+            "    </details>",
+            "  </main>",
             "</body>",
             "</html>",
             "",
@@ -467,27 +562,175 @@ def _mappings(value: object) -> Sequence[Mapping[str, object]]:
 
 
 def _text(value: object) -> str:
-    return "" if value is None else str(value)
+    return "Unavailable" if value is None else str(value)
 
 
 def _html_value(value: object) -> str:
     return html.escape(_text(value))
 
 
-def _html_row(*values: str) -> str:
+def _report_status(status: Mapping[str, object]) -> tuple[str, str]:
+    """Return a controlled visual class and plain-language status label."""
+    verified = status.get("verified") is True
+    published = status.get("published") is True
+    if verified and published:
+        return "success", "Verified and published"
+    if verified:
+        return "warning", "Verified; not published"
+    if published:
+        return "danger", "Published without verification"
+    return "danger", "Not verified or unpublished"
+
+
+def _as_number(value: object) -> float | None:
+    """Return a finite report number without treating booleans as counts."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def _percent(value: float | None) -> str:
+    if value is None:
+        return "Unavailable"
+    return f"{value * 100:.2f}%"
+
+
+def _progress_width(value: float | None) -> int:
+    """Clamp a data-derived ratio for a purely presentational CSS bar."""
+    if value is None:
+        return 0
+    return round(min(1.0, max(0.0, value)) * 100)
+
+
+def _duration(value: object) -> str:
+    number = _as_number(value)
+    return "Unavailable" if number is None else f"{number:.2f} s"
+
+
+def _metric_card(label: str, value: str, description: str) -> str:
+    """Render a metric card from pre-escaped values and fixed labels."""
+    return "\n".join(
+        (
+            '        <article class="metric-card">',
+            f"          <p>{html.escape(label)}</p>",
+            f"          <strong>{value}</strong>",
+            f"          <span>{html.escape(description)}</span>",
+            "        </article>",
+        )
+    )
+
+
+def _size_card(label: str, size: Mapping[str, object]) -> str:
+    """Render one artifact's size with unavailable values made explicit."""
+    return "\n".join(
+        (
+            '        <article class="size-card">',
+            f"          <p>{html.escape(label)}</p>",
+            f"          <strong>{_html_value(size.get('python_loc'))} LOC</strong>",
+            f"          <span>{_html_value(size.get('python_files'))} Python files</span>",
+            "        </article>",
+        )
+    )
+
+
+def _status_card(label: str, value: str, description: str) -> str:
+    """Render an explicit textual status card without relying only on color."""
+    return "\n".join(
+        (
+            '      <article class="status-card">',
+            f"        <p>{html.escape(label)}</p>",
+            f"        <strong>{value}</strong>",
+            f"        <span>{html.escape(description)}</span>",
+            "      </article>",
+        )
+    )
+
+
+def _stage_row(stage: Mapping[str, object], maximum_loc: float) -> str:
+    """Render all existing stage values plus a data-backed LOC bar."""
+    removed = _as_number(stage.get("loc_removed"))
+    width = (
+        0 if maximum_loc <= 0 or removed is None else round(removed / maximum_loc * 100)
+    )
+    return "\n".join(
+        (
+            "            <tr>",
+            f'              <th scope="row">{_html_value(stage.get("name"))}</th>',
+            f"              <td>{_html_value(stage.get('candidate_attempts'))}</td>",
+            f"              <td>{_html_value(stage.get('accepted'))}</td>",
+            f"              <td>{_html_value(stage.get('rejected'))}</td>",
+            f"              <td>{_html_value(stage.get('executions'))}</td>",
+            "              <td>",
+            f"                <span>{_html_value(stage.get('loc_removed'))}</span>",
+            '                <span class="stage-bar" aria-hidden="true">'
+            f'<span style="width:{width}%"></span></span>',
+            "              </td>",
+            "            </tr>",
+        )
+    )
+
+
+def _verification_runs(verification: Mapping[str, object]) -> str:
+    """Format the available verification evidence without assuming success."""
     return (
-        "    <tr>"
-        + "".join(f"<td>{html.escape(value)}</td>" for value in values)
-        + "</tr>"
+        f"{_html_value(verification.get('same_failure_runs'))}/"
+        f"{_html_value(verification.get('required_runs'))} same-failure runs"
     )
 
 
-def _html_list_item(label: str, value: str) -> str:
-    """Return one escaped HTML list item with an already-rendered value."""
-    return f"    <li>{html.escape(label)}: {value}</li>"
+def _detail_row(label: str, value: str) -> str:
+    return f"        <dt>{html.escape(label)}</dt><dd>{value}</dd>"
 
 
-def _size_row(name: str, size: Mapping[str, object]) -> str:
-    return _html_row(
-        name, _text(size.get("python_files")), _text(size.get("python_loc"))
-    )
+_REPORT_STYLES = """
+    :root { color-scheme: light; --ink:#172033; --muted:#65708a; --line:#d9e0ec;
+      --panel:#ffffff; --canvas:#f4f7fb; --blue:#245ac7; --blue-soft:#eaf1ff;
+      --green:#14734a; --green-soft:#eaf8f1; --amber:#9a5b00; --amber-soft:#fff5df;
+      --red:#b42318; --red-soft:#fff0ee; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--canvas); color:var(--ink); font:15px/1.55
+      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { max-width:1120px; margin:0 auto; padding:40px 24px 56px; }
+    h1,h2,p { margin:0; } h1 { margin-top:4px; font-size:clamp(2rem, 5vw, 3.25rem);
+      line-height:1.08; letter-spacing:-.045em; } h2 { font-size:1.15rem; }
+    .report-header,.section-heading { display:flex; align-items:flex-start; justify-content:space-between;
+      gap:24px; } .report-header { margin-bottom:38px; }
+    .eyebrow { color:var(--blue); font-size:.73rem; font-weight:750; letter-spacing:.12em;
+      text-transform:uppercase; } .subtitle,.muted { margin-top:8px; color:var(--muted); }
+    .status-badge { max-width:240px; margin:0; border:1px solid transparent; border-radius:999px;
+      padding:8px 12px; font-size:.85rem; font-weight:750; text-align:center; }
+    .status-badge.success { color:var(--green); background:var(--green-soft); border-color:#9cdec1; }
+    .status-badge.warning { color:var(--amber); background:var(--amber-soft); border-color:#ead18f; }
+    .status-badge.danger { color:var(--red); background:var(--red-soft); border-color:#efb1aa; }
+    .metric-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin:16px 0 30px; }
+    .metric-card,.size-card,.status-card,.panel,.details { background:var(--panel); border:1px solid var(--line);
+      border-radius:14px; box-shadow:0 6px 20px rgba(26,46,78,.045); }
+    .metric-card { min-height:130px; padding:17px; } .metric-card p,.size-card p,.status-card p { color:var(--muted);
+      font-size:.78rem; font-weight:650; } .metric-card strong,.size-card strong,.status-card strong { display:block;
+      margin:8px 0 5px; font-size:1.35rem; line-height:1.15; letter-spacing:-.025em; overflow-wrap:anywhere; }
+    .metric-card span,.size-card span,.status-card span { color:var(--muted); font-size:.76rem; }
+    .panel { margin-top:22px; padding:22px; } .section-heading { margin-bottom:18px; }
+    .section-heading strong { color:var(--blue); font-size:.9rem; }
+    .comparison-grid,.status-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+    .size-card,.status-card { padding:16px; } .size-card { border-top:3px solid var(--blue); }
+    .progress-label { display:flex; justify-content:space-between; margin-top:20px; color:var(--muted); font-size:.82rem; }
+    .progress-track,.stage-bar { display:block; overflow:hidden; background:#e7edf7; border-radius:999px; }
+    .progress-track { height:10px; margin-top:7px; } .progress-track span,.stage-bar span { display:block;
+      height:100%; background:linear-gradient(90deg, #245ac7, #4980e8); border-radius:inherit; }
+    .status-grid { margin:22px 0; } .status-card strong { color:var(--blue); }
+    .table-wrap { overflow-x:auto; } table { width:100%; min-width:760px; border-collapse:collapse; font-size:.87rem; }
+    th,td { border-bottom:1px solid var(--line); padding:11px 10px; text-align:left; vertical-align:middle; }
+    thead th { color:var(--muted); font-size:.73rem; letter-spacing:.04em; text-transform:uppercase; }
+    tbody tr:last-child th,tbody tr:last-child td { border-bottom:0; } tbody th { font-weight:700; }
+    .stage-bar { width:100%; min-width:80px; height:6px; margin-top:5px; }
+    .details { margin-top:22px; padding:0 20px; } summary { cursor:pointer; padding:16px 0; font-weight:750; }
+    dl { display:grid; grid-template-columns:max-content minmax(0,1fr); gap:9px 20px; margin:0; padding:0 0 20px; }
+    dt { color:var(--muted); } dd { margin:0; overflow-wrap:anywhere; }
+    @media (max-width:850px) { .metric-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+    @media (max-width:620px) { main { padding:28px 16px 40px; } .report-header,.section-heading { display:block; }
+      .status-badge { display:inline-block; margin-top:16px; } .metric-grid,.comparison-grid,.status-grid { grid-template-columns:1fr; }
+      .panel { padding:17px; } dl { grid-template-columns:1fr; gap:3px; } dd { margin-bottom:10px; } }
+    @media print { body { background:#fff; font-size:11pt; } main { max-width:none; padding:0; } .metric-card,.size-card,
+      .status-card,.panel,.details { box-shadow:none; break-inside:avoid; } .details { display:block; } details:not([open]) > *:not(summary) { display:block; }
+      .table-wrap { overflow:visible; } table { min-width:0; } }
+"""
