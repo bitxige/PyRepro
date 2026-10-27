@@ -94,6 +94,8 @@ publication status, and final verification. Both paths must be new and outside
 the source project. The HTML report is rendered from the same data as the JSON
 report. In Fast Mode, an unpublished terminal state remains explicitly marked
 as unverified and unpublished.
+See [`docs/report-schema.md`](docs/report-schema.md) for field meanings and
+Oracle-counting boundaries.
 
 The module entry point is equivalent:
 

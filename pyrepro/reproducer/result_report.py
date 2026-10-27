@@ -88,6 +88,9 @@ def build_fast_report(
     """
     budget = publication.budget
     attempts = publication.verification_attempts
+    final_verification_executions = max(
+        0, budget.executions_started - reduction.executions
+    )
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "mode": "fast",
@@ -104,6 +107,7 @@ def build_fast_report(
         "oracle": {
             "total_executions": budget.executions_started,
             "reduction_executions": reduction.executions,
+            "final_verification_executions": final_verification_executions,
             "budget": {
                 "max_executions": budget.max_oracle_executions,
                 "remaining_executions": budget.remaining_executions,
@@ -123,6 +127,7 @@ def build_fast_report(
                 attempt.outcome is not None and attempt.outcome.value == "same_failure"
                 for attempt in attempts
             ),
+            "oracle_executions": final_verification_executions,
             "passed": publication.verified,
             "attempts": [
                 {
@@ -183,6 +188,7 @@ def build_standard_report(
         "oracle": {
             "total_executions": reduction_executions + 1,
             "reduction_executions": reduction_executions,
+            "final_verification_executions": 1,
         },
         "timing": {
             "reduction_wall_clock_seconds": file_result.wall_clock_seconds
@@ -194,6 +200,7 @@ def build_standard_report(
             "required_runs": 1,
             "completed_runs": 1,
             "same_failure_runs": 1,
+            "oracle_executions": 1,
             "passed": True,
             "attempts": [],
         },
@@ -307,7 +314,7 @@ def render_html(report: Mapping[str, object]) -> str:
             _metric_card(
                 "Oracle executions",
                 _html_value(oracle.get("total_executions")),
-                "all recorded command executions",
+                "reduction and final-verification commands",
             ),
             _metric_card(
                 "End-to-end runtime",
@@ -384,6 +391,14 @@ def render_html(report: Mapping[str, object]) -> str:
                 _duration(timing.get("reduction_wall_clock_seconds")),
             ),
             _detail_row("Budget maximum", _html_value(budget.get("max_executions"))),
+            _detail_row(
+                "Reduction Oracle executions",
+                _html_value(oracle.get("reduction_executions")),
+            ),
+            _detail_row(
+                "Final-verification executions",
+                _html_value(oracle.get("final_verification_executions")),
+            ),
             _detail_row(
                 "Budget remaining", _html_value(budget.get("remaining_executions"))
             ),

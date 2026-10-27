@@ -101,10 +101,18 @@ def test_standard_mode_cli_optionally_writes_final_result_reports(
     assert report["final_verification"] == {
         "attempts": [],
         "completed_runs": 1,
+        "oracle_executions": 1,
         "passed": True,
         "required_runs": 1,
         "same_failure_runs": 1,
     }
+    assert report["oracle"]["total_executions"] == (
+        report["oracle"]["reduction_executions"]
+        + report["oracle"]["final_verification_executions"]
+    )
+    assert report["size"]["loc_reduction_ratio"] == pytest.approx(
+        report["size"]["loc_removed"] / report["size"]["input"]["python_loc"]
+    )
     assert "JSON report:" in captured.out
     assert "HTML report:" in captured.out
     assert "PyRepro reduction report" in html_report.read_text(encoding="utf-8")
@@ -616,6 +624,14 @@ def test_fast_mode_cli_optionally_writes_final_result_reports(tmp_path: Path, ca
     }
     assert report["final_verification"]["same_failure_runs"] == 3
     assert report["final_verification"]["required_runs"] == 3
+    assert report["oracle"]["total_executions"] == (
+        report["oracle"]["reduction_executions"]
+        + report["oracle"]["final_verification_executions"]
+    )
+    assert (
+        report["final_verification"]["oracle_executions"]
+        == report["oracle"]["final_verification_executions"]
+    )
     assert report["size"]["input"]["python_loc"] > 0
     assert report["size"]["published_output"] is not None
     assert "JSON report:" in captured.out

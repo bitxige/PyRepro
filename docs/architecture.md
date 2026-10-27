@@ -257,6 +257,8 @@ new files outside the protected source root; they do not replace JSONL probe
 telemetry or influence Oracle decisions. Both formats use one structured report
 mapping. A Fast Mode report distinguishes the accepted candidate workspace from
 an official published output and records unpublished terminal states truthfully.
+Its versioned field definitions and Oracle-counting boundaries are documented
+in [`report-schema.md`](report-schema.md).
 
 P3 reports file-phase and symbol-phase oracle execution counts and wall-clock
 durations separately, as well as symbol counts, symbol probe outcomes, and

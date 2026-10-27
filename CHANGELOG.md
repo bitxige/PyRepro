@@ -16,7 +16,8 @@ experiments remain available through Git history.
   and `--html-report`. Both formats share one truthful result schema covering
   size, Oracle and stage metrics, source integrity, verification, and
   publication status without changing reduction decisions or replacing JSONL
-  probe telemetry.
+  probe telemetry. The schema now documents the boundary between reduction and
+  final-verification Oracle executions.
 
 - Added default-disabled Fast Mode module-list entry reduction through
   `--max-list-entry-probes`. The conservative stage recognizes only
