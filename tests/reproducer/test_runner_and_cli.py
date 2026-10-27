@@ -770,6 +770,44 @@ def test_fast_mode_cli_optionally_runs_list_entry_probes(tmp_path: Path, capsys)
     assert any(record["phase"] == "list_entry" for record in records)
 
 
+def test_fast_mode_cli_leaves_list_entry_reduction_disabled_by_default(
+    tmp_path: Path, capsys
+):
+    """Do not run list-entry probes unless their explicit budget is positive."""
+    source = tmp_path / "source"
+    output = tmp_path / "verified-output"
+    _fast_list_entry_project(source)
+    source_digest = tree_digest(source)
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--mode",
+            "fast",
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--max-oracle-executions",
+            "20",
+            "--max-coarse-probes",
+            "0",
+            "--output",
+            str(output),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert "Final verification: 3/3 passed" in captured.out
+    assert "List-entry probes:" not in captured.out
+    assert "(3, 4, 0)" in (output / "target.py").read_text(encoding="utf-8")
+    assert tree_digest(source) == source_digest
+
+
 def test_fast_mode_cli_rejects_negative_container_entry_probe_limit(
     tmp_path: Path, capsys
 ):
