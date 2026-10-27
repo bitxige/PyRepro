@@ -6,6 +6,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from time import perf_counter
 
 from pyrepro.reproducer.budget import BudgetExhaustedError, ExecutionBudget
 from pyrepro.reproducer.failure import (
@@ -35,6 +36,12 @@ from pyrepro.reproducer.reducer import (
     GreedyFileReducer,
     UnstableBaselineError,
     format_reduction_summary,
+)
+from pyrepro.reproducer.result_report import (
+    build_fast_report,
+    build_standard_report,
+    validate_report_paths,
+    write_reports,
 )
 from pyrepro.reproducer.runner import CommandRunner
 from pyrepro.reproducer.symbol_reducer import (
@@ -218,6 +225,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             "the source project"
         ),
     )
+    reduce_parser.add_argument(
+        "--json-report",
+        type=Path,
+        help="write an optional final JSON result report outside the source project",
+    )
+    reduce_parser.add_argument(
+        "--html-report",
+        type=Path,
+        help="write an optional final HTML result report outside the source project",
+    )
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments and arguments[0] == "analyze-imports":
         return _analyze_imports(parser, arguments)
@@ -235,12 +252,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not source.is_dir():
         parser.error(f"source root is not a directory: {source}")
     output = args.output or _default_output_directory(source)
+    json_report: Path | None = None
+    html_report: Path | None = None
     try:
         probe_report = (
             None
             if args.probe_records is None
             else validate_probe_report_path(args.probe_records, source)
         )
+        if args.operation == "reduce":
+            json_report, html_report = validate_report_paths(
+                args.json_report, args.html_report, source, output
+            )
+            if probe_report is not None and probe_report in {json_report, html_report}:
+                raise ValueError(
+                    "probe report and final report paths must be different"
+                )
     except ValueError as error:
         parser.error(str(error))
 
@@ -256,7 +283,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("Warning: PyRepro will repeatedly execute the supplied command.")
     print("Only run a project and command that you trust.")
     if args.mode == "fast":
-        return _reduce_fast(parser, args, source, output, probe_report, command)
+        return _reduce_fast(
+            parser,
+            args,
+            source,
+            output,
+            probe_report,
+            json_report,
+            html_report,
+            command,
+        )
+    started_at = perf_counter()
     try:
         runner = CommandRunner(command, timeout_seconds=args.timeout_seconds)
         reducer_type = (
@@ -298,6 +335,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"remains at {destination}: {error}"
             )
 
+    if json_report is not None or html_report is not None:
+        try:
+            write_reports(
+                build_standard_report(
+                    source,
+                    destination,
+                    file_result,
+                    symbol_result,
+                    run_wall_clock_seconds=perf_counter() - started_at,
+                ),
+                json_report,
+                html_report,
+            )
+        except OSError as error:
+            parser.error(
+                "failed to write final result report; the verified reduced project "
+                f"remains at {destination}: {error}"
+            )
+
     print(format_reduction_summary(file_result))
     if symbol_result is not None:
         print()
@@ -313,6 +369,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"Reduced project: {destination}")
     if probe_report is not None:
         print(f"Probe records: {probe_report}")
+    if json_report is not None:
+        print(f"JSON report: {json_report}")
+    if html_report is not None:
+        print(f"HTML report: {html_report}")
     return 0
 
 
@@ -322,6 +382,8 @@ def _reduce_fast(
     source: Path,
     output: Path,
     probe_report: Path | None,
+    json_report: Path | None,
+    html_report: Path | None,
     command: Sequence[str],
 ) -> int:
     """Run the existing budgeted pipeline and report its publishing state.
@@ -331,6 +393,7 @@ def _reduce_fast(
     :func:`verify_and_publish`.
     """
     _validate_fast_arguments(parser, args)
+    started_at = perf_counter()
     try:
         runner = CommandRunner(command, timeout_seconds=args.timeout_seconds)
         match_mode = FailureMatchMode(args.failure_match)
@@ -363,6 +426,13 @@ def _reduce_fast(
                 budget,
                 search_budget_exhausted=reduction.budget_exhausted,
             )
+            report = build_fast_report(
+                source,
+                workspace.root,
+                reduction,
+                publication,
+                run_wall_clock_seconds=perf_counter() - started_at,
+            )
     except UnstableBaselineError as error:
         _print_fast_failure("baseline_failed", str(error))
         return 1
@@ -381,10 +451,25 @@ def _reduce_fast(
         except OSError as error:
             print(f"Warning: failed to write probe records: {error}", file=sys.stderr)
 
+    report_written = True
+    if json_report is not None or html_report is not None:
+        try:
+            write_reports(report, json_report, html_report)
+        except OSError as error:
+            report_written = False
+            print(
+                f"Warning: failed to write final result report: {error}",
+                file=sys.stderr,
+            )
+
     _print_fast_publication(publication, reduction)
     if probe_report_written:
         print(f"Probe records: {probe_report}")
-    return 0 if publication.verified else 1
+    if json_report is not None and report_written:
+        print(f"JSON report: {json_report}")
+    if html_report is not None and report_written:
+        print(f"HTML report: {html_report}")
+    return 0 if publication.verified and report_written else 1
 
 
 def _validate_fast_arguments(

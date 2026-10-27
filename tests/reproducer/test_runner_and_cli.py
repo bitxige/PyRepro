@@ -68,6 +68,56 @@ def test_module_cli_writes_a_verified_reduced_project(tmp_path: Path, capsys):
     assert (output / "reproduce.py").is_file()
 
 
+def test_standard_mode_cli_optionally_writes_final_result_reports(
+    tmp_path: Path, capsys
+):
+    """Standard Mode reports its one-run copied-output verification accurately."""
+    output = tmp_path / "reduced-project"
+    json_report = tmp_path / "result.json"
+    html_report = tmp_path / "result.html"
+
+    status = main(
+        [
+            "reduce",
+            str(FAILING_PROJECT),
+            "--output",
+            str(output),
+            "--json-report",
+            str(json_report),
+            "--html-report",
+            str(html_report),
+            "--",
+            sys.executable,
+            "reproduce.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    report = json.loads(json_report.read_text(encoding="utf-8"))
+
+    assert status == 0
+    assert report["mode"] == "standard"
+    assert report["status"]["verified"]
+    assert report["final_verification"] == {
+        "attempts": [],
+        "completed_runs": 1,
+        "oracle_executions": 1,
+        "passed": True,
+        "required_runs": 1,
+        "same_failure_runs": 1,
+    }
+    assert report["oracle"]["total_executions"] == (
+        report["oracle"]["reduction_executions"]
+        + report["oracle"]["final_verification_executions"]
+    )
+    assert report["size"]["loc_reduction_ratio"] == pytest.approx(
+        report["size"]["loc_removed"] / report["size"]["input"]["python_loc"]
+    )
+    assert "JSON report:" in captured.out
+    assert "HTML report:" in captured.out
+    assert "PyRepro reduction report" in html_report.read_text(encoding="utf-8")
+
+
 def test_standard_mode_rejects_an_output_copy_with_a_different_failure(
     tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
 ):
@@ -239,6 +289,34 @@ def test_module_cli_rejects_an_existing_probe_report(tmp_path: Path, capsys):
     assert error.value.code == 2
     assert "probe report path already exists" in captured.err
     assert report.read_text(encoding="utf-8") == "previous telemetry\n"
+
+
+def test_module_cli_rejects_probe_and_final_report_path_overlap(tmp_path: Path, capsys):
+    """Probe telemetry and the final summary cannot overwrite one another."""
+    report = tmp_path / "report.json"
+
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "reduce",
+                str(FAILING_PROJECT),
+                "--output",
+                str(tmp_path / "output"),
+                "--probe-records",
+                str(report),
+                "--json-report",
+                str(report),
+                "--",
+                sys.executable,
+                "reproduce.py",
+            ]
+        )
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 2
+    assert "probe report and final report paths must be different" in captured.err
+    assert not report.exists()
 
 
 def test_module_cli_cleans_failed_probe_report_and_preserves_output(
@@ -495,6 +573,70 @@ def test_fast_mode_cli_publishes_a_verified_reproducer(tmp_path: Path, capsys):
     assert "from ballast import Unneeded" not in (
         output / "tests/test_target.py"
     ).read_text(encoding="utf-8")
+
+
+def test_fast_mode_cli_optionally_writes_final_result_reports(tmp_path: Path, capsys):
+    """Final JSON and HTML reports describe the verified publication result."""
+    source = tmp_path / "source"
+    output = tmp_path / "verified-output"
+    json_report = tmp_path / "result.json"
+    html_report = tmp_path / "result.html"
+    _fast_project(source)
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--mode",
+            "fast",
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--max-oracle-executions",
+            "7",
+            "--max-coarse-probes",
+            "0",
+            "--json-report",
+            str(json_report),
+            "--html-report",
+            str(html_report),
+            "--output",
+            str(output),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    report = json.loads(json_report.read_text(encoding="utf-8"))
+
+    assert status == 0
+    assert report["schema_version"] == 1
+    assert report["mode"] == "fast"
+    assert report["status"] == {
+        "error_message": None,
+        "output_path": str(output.resolve()),
+        "published": True,
+        "search_budget_exhausted": True,
+        "source_unchanged": True,
+        "terminal_state": "budget_exhausted_verified",
+        "verified": True,
+    }
+    assert report["final_verification"]["same_failure_runs"] == 3
+    assert report["final_verification"]["required_runs"] == 3
+    assert report["oracle"]["total_executions"] == (
+        report["oracle"]["reduction_executions"]
+        + report["oracle"]["final_verification_executions"]
+    )
+    assert (
+        report["final_verification"]["oracle_executions"]
+        == report["oracle"]["final_verification_executions"]
+    )
+    assert report["size"]["input"]["python_loc"] > 0
+    assert report["size"]["published_output"] is not None
+    assert "JSON report:" in captured.out
+    assert "HTML report:" in captured.out
+    assert "PyRepro reduction report" in html_report.read_text(encoding="utf-8")
 
 
 def test_fast_mode_cli_minimum_budget_reserves_final_verification(
@@ -1011,6 +1153,7 @@ def test_fast_mode_cli_maps_unpublished_terminal_states(
     """Map existing unpublished publisher states through the public CLI."""
     source = tmp_path / "source"
     output = tmp_path / "unpublished-output"
+    json_report = tmp_path / "result.json"
     _fast_project(source)
 
     def unpublished_result(*args, **kwargs):
@@ -1041,6 +1184,8 @@ def test_fast_mode_cli_maps_unpublished_terminal_states(
             "0",
             "--output",
             str(output),
+            "--json-report",
+            str(json_report),
             "--",
             sys.executable,
             "run_target.py",
@@ -1054,6 +1199,11 @@ def test_fast_mode_cli_maps_unpublished_terminal_states(
     assert "No official reproducer was published." in captured.out
     assert "Published reproducer:" not in captured.out
     assert not output.exists()
+    report = json.loads(json_report.read_text(encoding="utf-8"))
+    assert report["status"]["terminal_state"] == state.value
+    assert not report["status"]["verified"]
+    assert not report["status"]["published"]
+    assert report["size"]["published_output"] is None
 
 
 def test_fast_mode_cli_requires_compatible_fast_arguments(tmp_path: Path):
