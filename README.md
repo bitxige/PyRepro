@@ -87,6 +87,16 @@ rejected source-edit candidate was rolled back. The path
 must be new and outside the source project. This observability output does not
 alter reduction decisions.
 
+`--json-report <path>` and `--html-report <path>` optionally write final
+result reports. They are separate from probe telemetry: each report summarizes
+the completed reduction's size, Oracle cost, stage metrics, source integrity,
+publication status, and final verification. Both paths must be new and outside
+the source project. The HTML report is rendered from the same data as the JSON
+report. In Fast Mode, an unpublished terminal state remains explicitly marked
+as unverified and unpublished.
+See [`docs/report-schema.md`](docs/report-schema.md) for field meanings and
+Oracle-counting boundaries.
+
 The module entry point is equivalent:
 
 ```bash
@@ -117,6 +127,8 @@ pyrepro reduce ~/my_project \
   --max-container-entry-probes 60 \
   --max-list-entry-probes 60 \
   --symbol-order span-desc \
+  --json-report /tmp/reduced-example.json \
+  --html-report /tmp/reduced-example.html \
   --output /tmp/reduced-example \
   -- python run_target.py
 ```
