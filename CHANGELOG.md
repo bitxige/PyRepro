@@ -7,6 +7,10 @@ experiments remain available through Git history.
 
 ### Changed
 
+- Corrected final Fast Mode report sizing when a published output directory is
+  named `output`; ignored-directory filtering now applies only below the
+  reported project root.
+
 - Expanded the GitHub Actions test matrix to cover CPython 3.10, 3.11, and
   3.12.
 
