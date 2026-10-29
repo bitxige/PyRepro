@@ -440,6 +440,55 @@ def test_optional_stages_share_the_last_available_search_slots(tmp_path: Path):
     assert tree_digest(tmp_path) == digest
 
 
+def test_pipeline_runs_main_guard_stage_after_prior_fast_stages(tmp_path: Path):
+    """Main-guard probes share the Fast budget and retain source integrity."""
+    _main_guard_project(tmp_path)
+    digest = tree_digest(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+    budget = ExecutionBudget(20)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = PreprocessingFirstReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            max_import_probes=1,
+            max_coarse_probes=0,
+            max_main_guard_probes=4,
+        ).reduce(workspace, budget=budget)
+
+        assert result.main_guard_reduction is not None
+        main_guard = result.main_guard_reduction
+        assert main_guard.candidate_attempts == 1
+        assert main_guard.removed_guards == 2
+        assert result.executions == budget.snapshot().executions_started
+        assert "main_guard" in {record.phase for record in result.probe_records}
+        assert "if __name__" not in (workspace.root / "target.py").read_text(
+            encoding="utf-8"
+        )
+
+    assert tree_digest(tmp_path) == digest
+
+
+def test_pipeline_default_keeps_main_guard_stage_disabled(tmp_path: Path):
+    """The direct module-level stage must not change the Fast default flow."""
+    _main_guard_project(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+    budget = ExecutionBudget(20)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = PreprocessingFirstReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            max_import_probes=1,
+            max_coarse_probes=0,
+        ).reduce(workspace, budget=budget)
+
+        assert result.main_guard_reduction is None
+        assert "if __name__" in (workspace.root / "target.py").read_text(
+            encoding="utf-8"
+        )
+
+
 def test_coarse_stops_before_split_when_global_budget_is_exhausted(tmp_path: Path):
     """A rejected group cannot consume extra split probes after its last slot."""
     _nested_project(tmp_path)
@@ -675,6 +724,32 @@ def _list_entry_project(root: Path) -> None:
         "]\n\n"
         "def target_failure() -> None:\n"
         "    assert (1, 2, -1) in CELL_WIDTHS\n"
+        "    raise ValueError('target failure')\n",
+    )
+    _write(
+        root,
+        "tests/test_target.py",
+        "from target import target_failure\n\n"
+        "def test_failure() -> None:\n"
+        "    target_failure()\n",
+    )
+    _write(
+        root,
+        "run_target.py",
+        "from tests.test_target import test_failure\ntest_failure()\n",
+    )
+
+
+def _main_guard_project(root: Path) -> None:
+    _write(root, "tests/__init__.py", "")
+    _write(
+        root,
+        "target.py",
+        "if __name__ == '__main__':  # pragma: no cover\n"
+        "    print('unused')\n\n"
+        "if '__main__' == __name__:\n"
+        "    print('also unused')\n\n"
+        "def target_failure() -> None:\n"
         "    raise ValueError('target failure')\n",
     )
     _write(

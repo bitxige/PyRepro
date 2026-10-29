@@ -220,6 +220,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     reduce_parser.add_argument(
+        "--max-main-guard-probes",
+        type=int,
+        default=0,
+        help=(
+            "experimental bounded module-level __main__ guard probes after Fast "
+            "Mode list-entry cleanup (default: 0; zero disables)"
+        ),
+    )
+    reduce_parser.add_argument(
         "--symbol-order",
         choices=tuple(order.value for order in SymbolOrder),
         default=SymbolOrder.DISCOVERY.value,
@@ -435,6 +444,7 @@ def _reduce_fast(
                 max_if_statement_probes=args.max_if_statement_probes,
                 max_container_entry_probes=args.max_container_entry_probes,
                 max_list_entry_probes=args.max_list_entry_probes,
+                max_main_guard_probes=args.max_main_guard_probes,
                 symbol_order=SymbolOrder(args.symbol_order),
             )
             with ReductionWorkspace(source) as workspace:
@@ -522,6 +532,8 @@ def _validate_fast_arguments(
         )
     if args.max_list_entry_probes < 0:
         parser.error("--max-list-entry-probes must not be negative with --mode fast")
+    if args.max_main_guard_probes < 0:
+        parser.error("--max-main-guard-probes must not be negative with --mode fast")
     if (
         args.max_symbol_probes == 0
         and args.max_method_probes == 0
@@ -593,6 +605,14 @@ def _print_fast_publication(
             f"({list_result.accepted_batches} accepted)"
         )
         print(f"List entries removed: {list_result.removed_entries}")
+    if reduction.main_guard_reduction is not None:
+        main_guard_result = reduction.main_guard_reduction
+        print(
+            "Main-guard probes: "
+            f"{main_guard_result.candidate_attempts} "
+            f"({main_guard_result.accepted_batches} accepted)"
+        )
+        print(f"Main guards removed: {main_guard_result.removed_guards}")
 
 
 def _fast_state_message(publication: PublishingResult) -> str:
