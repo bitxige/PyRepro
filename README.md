@@ -134,6 +134,7 @@ pyrepro reduce ~/my_project \
   --max-if-statement-probes 60 \
   --max-container-entry-probes 60 \
   --max-list-entry-probes 60 \
+  --max-main-guard-probes 60 \
   --symbol-order span-desc \
   --json-report /tmp/reduced-example.json \
   --html-report /tmp/reduced-example.html \
@@ -144,10 +145,11 @@ pyrepro reduce ~/my_project \
 `--mode fast` requires both `--pytest-node` and
 `--max-oracle-executions`. It supports greedy file cleanup and optional,
 default-disabled complete-symbol, direct-method, complete-`if`,
-module-dictionary-entry, and module-list-entry stages.
+module-dictionary-entry, module-list-entry, and module-level `__main__` guard
+stages.
 `--max-symbol-probes 0`, `--max-method-probes 0`, and
 `--max-if-statement-probes 0`, `--max-container-entry-probes 0`, and
-`--max-list-entry-probes 0` disable
+`--max-list-entry-probes 0`, and `--max-main-guard-probes 0` disable
 their respective stages; positive values bound their probes. Method reduction
 is deliberately limited to direct methods
 of module-level classes and skips a sole method rather than creating an empty
@@ -168,9 +170,15 @@ reduction. It only considers unambiguous multiline module-level lists whose
 unique entries are tuples of integer literals. It skips comments, semicolon
 chains, duplicate or rebound bindings, dynamic items, and all other list
 shapes. It probes whole entry batches and recursively splits rejected batches;
-static facts never accept a deletion on their own. `--symbol-order span-desc`
+static facts never accept a deletion on their own. Main-guard reduction runs
+after module-list reduction. It only considers direct module-level statements
+whose entire condition is exactly `__name__ == "__main__"` or the reversed
+form; it excludes nested guards and all other module-level control flow. It
+deletes only the complete guard statement (including an inline header comment),
+re-discovers candidates after accepted edits, and recursively splits rejected
+batches. `--symbol-order span-desc`
 probes larger source spans first, with stable path and source-position
-tiebreakers, for every enabled symbol stage. All five stages share the Fast
+tiebreakers, for every enabled symbol stage. All six optional source stages share the Fast
 Mode budget, strict Oracle, rollback, and final Publisher verification; none
 uses `--max-granularity symbol`.
 `--strategy ddmin` and `--max-granularity symbol` remain rejected in Fast Mode,
