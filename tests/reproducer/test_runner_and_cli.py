@@ -977,6 +977,87 @@ def test_fast_mode_cli_leaves_list_entry_reduction_disabled_by_default(
     assert tree_digest(source) == source_digest
 
 
+def test_fast_mode_cli_optionally_runs_main_guard_probes(tmp_path: Path, capsys):
+    """Main-guard probes retain Fast publisher verification and telemetry."""
+    source = tmp_path / "source"
+    output = tmp_path / "verified-output"
+    report = tmp_path / "probes.jsonl"
+    _fast_main_guard_project(source)
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--mode",
+            "fast",
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--max-oracle-executions",
+            "20",
+            "--max-coarse-probes",
+            "0",
+            "--max-main-guard-probes",
+            "4",
+            "--probe-records",
+            str(report),
+            "--output",
+            str(output),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert "Final verification: 3/3 passed" in captured.out
+    assert "Main-guard probes: 1 (1 accepted)" in captured.out
+    assert "Main guards removed: 2" in captured.out
+    assert "if __name__" not in (output / "target.py").read_text(encoding="utf-8")
+    records = [
+        json.loads(line) for line in report.read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(record["phase"] == "main_guard" for record in records)
+
+
+def test_fast_mode_cli_leaves_main_guard_reduction_disabled_by_default(
+    tmp_path: Path, capsys
+):
+    """Do not run the optional main-guard stage without a positive budget."""
+    source = tmp_path / "source"
+    output = tmp_path / "verified-output"
+    _fast_main_guard_project(source)
+    source_digest = tree_digest(source)
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--mode",
+            "fast",
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--max-oracle-executions",
+            "20",
+            "--max-coarse-probes",
+            "0",
+            "--output",
+            str(output),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert "Main-guard probes:" not in captured.out
+    assert "if __name__" in (output / "target.py").read_text(encoding="utf-8")
+    assert tree_digest(source) == source_digest
+
+
 def test_fast_mode_cli_rejects_negative_container_entry_probe_limit(
     tmp_path: Path, capsys
 ):
@@ -1031,6 +1112,33 @@ def test_fast_mode_cli_rejects_negative_list_entry_probe_limit(tmp_path: Path, c
     captured = capsys.readouterr()
     assert error.value.code == 2
     assert "--max-list-entry-probes must not be negative" in captured.err
+
+
+def test_fast_mode_cli_rejects_negative_main_guard_probe_limit(tmp_path: Path, capsys):
+    """The optional main-guard stage follows the Fast-Mode bound contract."""
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "reduce",
+                str(tmp_path),
+                "--mode",
+                "fast",
+                "--pytest-node",
+                "tests/test_target.py::test_failure",
+                "--max-oracle-executions",
+                "6",
+                "--max-main-guard-probes",
+                "-1",
+                "--",
+                sys.executable,
+                "-c",
+                "raise ValueError('failure')",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert error.value.code == 2
+    assert "--max-main-guard-probes must not be negative" in captured.err
 
 
 def test_fast_mode_cli_rejects_negative_complete_if_probe_limit(tmp_path: Path, capsys):
@@ -1401,6 +1509,33 @@ def _fast_list_entry_project(root: Path) -> None:
         "]\n\n"
         "def target_failure() -> None:\n"
         "    assert (1, 2, -1) in CELL_WIDTHS\n"
+        "    raise ValueError('target failure')\n",
+    )
+    _write(
+        root,
+        "tests/test_target.py",
+        "from target import target_failure\n\n"
+        "def test_failure() -> None:\n"
+        "    target_failure()\n",
+    )
+    _write(
+        root,
+        "run_target.py",
+        "from tests.test_target import test_failure\ntest_failure()\n",
+    )
+
+
+def _fast_main_guard_project(root: Path) -> None:
+    """Create a retained failure with two removable direct main guards."""
+    _write(root, "tests/__init__.py", "")
+    _write(
+        root,
+        "target.py",
+        "if __name__ == '__main__':  # pragma: no cover\n"
+        "    print('unused')\n\n"
+        "if '__main__' == __name__:\n"
+        "    print('also unused')\n\n"
+        "def target_failure() -> None:\n"
         "    raise ValueError('target failure')\n",
     )
     _write(

@@ -270,7 +270,8 @@ unparsable files skipped during discovery.
 The current Fast Mode pipeline composes import pruning, optional coarse file
 probes, greedy file cleanup, and default-disabled source stages under one
 `ExecutionBudget`. Complete-symbol, direct-method, complete-`if`, static
-dictionary-entry, and static list-entry stages all share the strict failure
+dictionary-entry, static list-entry, and module-level `__main__` guard stages
+all share the strict failure
 oracle, disposable probe workspaces, rollback telemetry, and Publisher-owned
 staging 3/3 verification.
 
@@ -279,6 +280,13 @@ unambiguous multiline module-level lists whose unique items are tuples of
 integer literals. It uses exact source-range edits, probes whole batches, and
 recursively splits a rejected batch. It does not infer that static data is
 removable: the existing runtime oracle remains the only acceptance authority.
+
+The main-guard stage runs after list-entry reduction. It only considers direct
+module-level `if` statements with exactly `__name__ == "__main__"` or its
+reversed form. It deletes the complete statement including an inline header
+comment, but never an independent preceding comment. It re-discovers candidates
+after accepted edits, while rejected probes remain confined to disposable
+workspaces.
 
 ## Retained static-analysis foundation
 
