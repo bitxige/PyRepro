@@ -83,6 +83,7 @@ pyrepro/
 │   ├── budget.py               # Fast-Mode shared Oracle/time budget
 │   ├── publisher.py            # staging verification and verified publication
 │   ├── probe_report.py         # atomic opt-in JSONL probe telemetry
+│   ├── progress.py             # optional presentation-only terminal progress
 │   ├── result_report.py        # optional final JSON/HTML result reports
 │   ├── symbol_reducer.py      # AST source spans and greedy symbol reduction
 │   ├── if_statement_reducer.py # bounded complete-if source reduction

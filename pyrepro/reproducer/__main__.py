@@ -26,6 +26,7 @@ from pyrepro.reproducer.probe_report import (
     validate_probe_report_path,
     write_probe_records,
 )
+from pyrepro.reproducer.progress import TerminalProgress
 from pyrepro.reproducer.publisher import (
     FastModeTerminalState,
     PublishingResult,
@@ -134,6 +135,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         choices=("standard", "fast"),
         default="standard",
         help="reduction mode; fast uses a shared execution budget (default: standard)",
+    )
+    reduce_parser.add_argument(
+        "--progress",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help=(
+            "terminal reduction progress: auto uses an interactive terminal, "
+            "on forces it, off disables it (default: auto)"
+        ),
     )
     reduce_parser.add_argument(
         "--pytest-node",
@@ -280,8 +290,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             probe_report,
             command,
         )
-    print("Warning: PyRepro will repeatedly execute the supplied command.")
-    print("Only run a project and command that you trust.")
+    print("Warning: PyRepro will repeatedly execute the supplied command.", flush=True)
+    print("Only run a project and command that you trust.", flush=True)
     if args.mode == "fast":
         return _reduce_fast(
             parser,
@@ -295,31 +305,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     started_at = perf_counter()
     try:
-        runner = CommandRunner(command, timeout_seconds=args.timeout_seconds)
-        reducer_type = (
-            GreedyFileReducer if args.strategy == "greedy" else DdminFileReducer
-        )
-        match_mode = FailureMatchMode(args.failure_match)
-        reducer = reducer_type(
-            runner,
-            expected_text=args.expect,
-            match_mode=match_mode,
-        )
-        with ReductionWorkspace(source) as workspace:
-            file_result = reducer.reduce(workspace)
-            symbol_result = None
-            if args.max_granularity == "symbol":
-                symbol_result = GreedySymbolReducer(
-                    runner, match_mode=match_mode
-                ).reduce(workspace, file_result.baseline_signature)
-            destination = workspace.copy_reduced_to(output)
-            output_result = runner.run(destination)
-            output_outcome = classify_result(
-                output_result,
-                file_result.baseline_signature,
-                destination,
-                match_mode,
+        with TerminalProgress(args.progress) as progress:
+            runner = CommandRunner(
+                command,
+                timeout_seconds=args.timeout_seconds,
+                on_execution_start=progress.advance,
             )
+            reducer_type = (
+                GreedyFileReducer if args.strategy == "greedy" else DdminFileReducer
+            )
+            match_mode = FailureMatchMode(args.failure_match)
+            reducer = reducer_type(
+                runner,
+                expected_text=args.expect,
+                match_mode=match_mode,
+            )
+            with ReductionWorkspace(source) as workspace:
+                file_result = reducer.reduce(workspace)
+                symbol_result = None
+                if args.max_granularity == "symbol":
+                    symbol_result = GreedySymbolReducer(
+                        runner, match_mode=match_mode
+                    ).reduce(workspace, file_result.baseline_signature)
+                destination = workspace.copy_reduced_to(output)
+                output_result = runner.run(destination)
+                output_outcome = classify_result(
+                    output_result,
+                    file_result.baseline_signature,
+                    destination,
+                    match_mode,
+                )
     except (OSError, UnstableBaselineError, ValueError) as error:
         parser.error(str(error))
 
@@ -395,44 +410,51 @@ def _reduce_fast(
     _validate_fast_arguments(parser, args)
     started_at = perf_counter()
     try:
-        runner = CommandRunner(command, timeout_seconds=args.timeout_seconds)
         match_mode = FailureMatchMode(args.failure_match)
         budget = ExecutionBudget(
             args.max_oracle_executions,
             time_budget_seconds=args.max_time_seconds,
         )
-        reducer = PreprocessingFirstReducer(
-            runner,
-            args.pytest_node,
-            expected_text=args.expect,
-            match_mode=match_mode,
-            max_import_probes=args.max_import_probes,
-            max_coarse_probes=args.max_coarse_probes,
-            max_symbol_probes=args.max_symbol_probes,
-            max_method_probes=args.max_method_probes,
-            max_if_statement_probes=args.max_if_statement_probes,
-            max_container_entry_probes=args.max_container_entry_probes,
-            max_list_entry_probes=args.max_list_entry_probes,
-            symbol_order=SymbolOrder(args.symbol_order),
-        )
-        with ReductionWorkspace(source) as workspace:
-            reduction = reducer.reduce(workspace, budget=budget)
-            publication = verify_and_publish(
-                workspace,
+        with TerminalProgress(
+            args.progress, total_executions=args.max_oracle_executions
+        ) as progress:
+            runner = CommandRunner(
+                command,
+                timeout_seconds=args.timeout_seconds,
+                on_execution_start=progress.advance,
+            )
+            reducer = PreprocessingFirstReducer(
                 runner,
-                reduction.import_pruning.baseline_signature,
-                match_mode,
-                output,
-                budget,
-                search_budget_exhausted=reduction.budget_exhausted,
+                args.pytest_node,
+                expected_text=args.expect,
+                match_mode=match_mode,
+                max_import_probes=args.max_import_probes,
+                max_coarse_probes=args.max_coarse_probes,
+                max_symbol_probes=args.max_symbol_probes,
+                max_method_probes=args.max_method_probes,
+                max_if_statement_probes=args.max_if_statement_probes,
+                max_container_entry_probes=args.max_container_entry_probes,
+                max_list_entry_probes=args.max_list_entry_probes,
+                symbol_order=SymbolOrder(args.symbol_order),
             )
-            report = build_fast_report(
-                source,
-                workspace.root,
-                reduction,
-                publication,
-                run_wall_clock_seconds=perf_counter() - started_at,
-            )
+            with ReductionWorkspace(source) as workspace:
+                reduction = reducer.reduce(workspace, budget=budget)
+                publication = verify_and_publish(
+                    workspace,
+                    runner,
+                    reduction.import_pruning.baseline_signature,
+                    match_mode,
+                    output,
+                    budget,
+                    search_budget_exhausted=reduction.budget_exhausted,
+                )
+                report = build_fast_report(
+                    source,
+                    workspace.root,
+                    reduction,
+                    publication,
+                    run_wall_clock_seconds=perf_counter() - started_at,
+                )
     except UnstableBaselineError as error:
         _print_fast_failure("baseline_failed", str(error))
         return 1
