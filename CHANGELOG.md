@@ -16,6 +16,10 @@ experiments remain available through Git history.
 
 ### Added
 
+- Added an optional terminal progress display for `pyrepro reduce`. It is
+  interactive-terminal-only by default, reports actual Oracle command starts,
+  and supports `--progress auto|on|off` without affecting reduction decisions.
+
 - Extended default-disabled Fast Mode module-dictionary entry reduction to
   recognize direct integer values for string-keyed dictionaries. Booleans and
   other constant types remain conservatively excluded.

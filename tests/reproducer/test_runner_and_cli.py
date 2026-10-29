@@ -42,6 +42,33 @@ def test_runner_reports_timeout(tmp_path: Path):
     assert result.return_code is None
 
 
+def test_runner_notifies_execution_observer_before_each_command(tmp_path: Path):
+    """Progress presentation can observe starts without changing command results."""
+    started: list[str] = []
+    runner = CommandRunner(
+        (sys.executable, "-c", "raise KeyError('width')"),
+        timeout_seconds=2,
+        on_execution_start=lambda: started.append("started"),
+    )
+
+    result = runner.run(tmp_path)
+
+    assert result.return_code != 0
+    assert started == ["started"]
+
+
+def test_reduce_help_documents_progress_control(capsys):
+    """The progress display remains discoverable and explicitly controllable."""
+    with pytest.raises(SystemExit) as error:
+        main(["reduce", "--help"])
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 0
+    assert "--progress {auto,on,off}" in captured.out
+    assert "terminal reduction progress" in captured.out
+
+
 def test_module_cli_writes_a_verified_reduced_project(tmp_path: Path, capsys):
     """Run the P1 loop through the public subcommand entry point."""
     output = tmp_path / "reduced-project"

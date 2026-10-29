@@ -106,6 +106,14 @@ python -m pyrepro reduce examples/training_failure \
   -- python train.py
 ```
 
+### Terminal progress
+
+`pyrepro reduce` shows a compact live progress bar on an interactive terminal.
+Fast Mode displays started Oracle commands against its shared execution limit;
+Standard Mode displays a pulse and the actual number of commands started rather
+than inventing a total. Redirected output stays clean by default. Use
+`--progress on` to force the display or `--progress off` to disable it.
+
 ## Fast Mode
 
 Fast Mode is an explicit, budgeted workflow for producing a verified
