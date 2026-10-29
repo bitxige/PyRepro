@@ -443,10 +443,19 @@ def _validate_report_path(
 
 
 def _project_size(root: Path) -> dict[str, int]:
+    """Return eligible Python-file counts relative to one project root.
+
+    Ignore rules apply to directories inside ``root`` only.  An output project
+    may legitimately be named ``output``; checking absolute path components
+    would otherwise hide every file in that published project.
+    """
     files = tuple(
         path
         for path in root.rglob("*.py")
-        if not any(part in DEFAULT_IGNORED_DIRECTORY_NAMES for part in path.parts)
+        if not any(
+            part in DEFAULT_IGNORED_DIRECTORY_NAMES
+            for part in path.relative_to(root).parts
+        )
     )
     return {
         "python_files": len(files),

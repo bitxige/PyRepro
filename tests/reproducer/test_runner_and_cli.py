@@ -578,7 +578,7 @@ def test_fast_mode_cli_publishes_a_verified_reproducer(tmp_path: Path, capsys):
 def test_fast_mode_cli_optionally_writes_final_result_reports(tmp_path: Path, capsys):
     """Final JSON and HTML reports describe the verified publication result."""
     source = tmp_path / "source"
-    output = tmp_path / "verified-output"
+    output = tmp_path / "output"
     json_report = tmp_path / "result.json"
     html_report = tmp_path / "result.html"
     _fast_project(source)
@@ -633,7 +633,7 @@ def test_fast_mode_cli_optionally_writes_final_result_reports(tmp_path: Path, ca
         == report["oracle"]["final_verification_executions"]
     )
     assert report["size"]["input"]["python_loc"] > 0
-    assert report["size"]["published_output"] is not None
+    assert report["size"]["published_output"] == report["size"]["candidate"]
     assert "JSON report:" in captured.out
     assert "HTML report:" in captured.out
     assert "PyRepro reduction report" in html_report.read_text(encoding="utf-8")
