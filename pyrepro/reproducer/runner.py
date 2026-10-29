@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,14 +34,23 @@ class CommandRunner:
     Args:
         command: Non-empty argv command. It is never interpreted by a shell.
         timeout_seconds: Positive timeout applied to every execution.
+        on_execution_start: Optional presentation callback invoked immediately
+            before each trusted command starts.
     """
 
-    def __init__(self, command: Sequence[str], timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        command: Sequence[str],
+        timeout_seconds: float,
+        *,
+        on_execution_start: Callable[[], None] | None = None,
+    ) -> None:
         """Initialize a runner with a fixed argv command and timeout.
 
         Args:
             command: Non-empty argv command.
             timeout_seconds: Positive timeout for each process execution.
+            on_execution_start: Optional observer for terminal presentation.
 
         Raises:
             ValueError: If the command is empty or timeout is not positive.
@@ -52,6 +61,7 @@ class CommandRunner:
             raise ValueError("timeout_seconds must be positive")
         self.command = tuple(command)
         self.timeout_seconds = timeout_seconds
+        self._on_execution_start = on_execution_start
 
     def run(
         self, working_directory: Path, *, timeout_seconds: float | None = None
@@ -78,6 +88,8 @@ class CommandRunner:
         )
         if effective_timeout <= 0:
             raise ValueError("timeout_seconds must be positive")
+        if self._on_execution_start is not None:
+            self._on_execution_start()
         environment = dict(os.environ)
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
         try:
