@@ -508,6 +508,11 @@ def _fast_stage_summaries(
         ("container_entry", reduction.container_entry_reduction, "accepted_batches"),
         ("list_entry", reduction.list_entry_reduction, "accepted_batches"),
         ("main_guard", reduction.main_guard_reduction, "accepted_batches"),
+        (
+            "nested_list_entry",
+            reduction.nested_list_entry_reduction,
+            "accepted_batches",
+        ),
     )
     for name, stage, accepted_field in optional_stages:
         if stage is not None:

@@ -1058,6 +1058,79 @@ def test_fast_mode_cli_leaves_main_guard_reduction_disabled_by_default(
     assert tree_digest(source) == source_digest
 
 
+def test_fast_mode_cli_optionally_runs_nested_list_entry_probes(tmp_path: Path, capsys):
+    """Nested list-entry probes retain publisher verification and telemetry."""
+    source = tmp_path / "source"
+    output = tmp_path / "verified-output"
+    report = tmp_path / "probes.jsonl"
+    _fast_nested_palette_project(source)
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--mode",
+            "fast",
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--max-oracle-executions",
+            "20",
+            "--max-coarse-probes",
+            "0",
+            "--max-nested-list-entry-probes",
+            "4",
+            "--probe-records",
+            str(report),
+            "--output",
+            str(output),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert "Final verification: 3/3 passed" in captured.out
+    assert "Nested-list-entry probes: 1 (1 accepted)" in captured.out
+    assert "Nested list entries removed: 2" in captured.out
+    assert "(1, 2, 3)" not in (output / "target.py").read_text(encoding="utf-8")
+    records = [
+        json.loads(line) for line in report.read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(record["phase"] == "nested_list_entry" for record in records)
+
+
+def test_fast_mode_cli_rejects_negative_nested_list_entry_probe_limit(
+    tmp_path: Path, capsys
+):
+    """The nested-list entry stage follows the Fast-Mode bound contract."""
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "reduce",
+                str(tmp_path),
+                "--mode",
+                "fast",
+                "--pytest-node",
+                "tests/test_target.py::test_failure",
+                "--max-oracle-executions",
+                "6",
+                "--max-nested-list-entry-probes",
+                "-1",
+                "--",
+                sys.executable,
+                "-c",
+                "raise ValueError('failure')",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert error.value.code == 2
+    assert "--max-nested-list-entry-probes must not be negative" in captured.err
+
+
 def test_fast_mode_cli_rejects_negative_container_entry_probe_limit(
     tmp_path: Path, capsys
 ):
@@ -1536,6 +1609,37 @@ def _fast_main_guard_project(root: Path) -> None:
         "if '__main__' == __name__:\n"
         "    print('also unused')\n\n"
         "def target_failure() -> None:\n"
+        "    raise ValueError('target failure')\n",
+    )
+    _write(
+        root,
+        "tests/test_target.py",
+        "from target import target_failure\n\n"
+        "def test_failure() -> None:\n"
+        "    target_failure()\n",
+    )
+    _write(
+        root,
+        "run_target.py",
+        "from tests.test_target import test_failure\ntest_failure()\n",
+    )
+
+
+def _fast_nested_palette_project(root: Path) -> None:
+    """Create one preserved nested Palette list with removable RGB entries."""
+    _write(root, "tests/__init__.py", "")
+    _write(
+        root,
+        "target.py",
+        "class Palette:\n"
+        "    def __init__(self, colors, *, label):\n"
+        "        self.colors = colors\n\n"
+        "CUSTOM_COLORS = Palette(\n"
+        "    [\n        (1, 2, 3),\n        (4, 5, 6),\n    ],\n"
+        "    label='test',\n"
+        ")\n\n"
+        "def target_failure() -> None:\n"
+        "    assert isinstance(CUSTOM_COLORS.colors, list)\n"
         "    raise ValueError('target failure')\n",
     )
     _write(

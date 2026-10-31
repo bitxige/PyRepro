@@ -10,8 +10,8 @@ user-specified runtime failure. Its central principle is:
 PyRepro implements execution-verified file reduction followed by optional
 source-symbol reduction. Its opt-in Fast Mode composes target-aware import
 pruning, bounded coarse deletion, greedy cleanup, optional complete-symbol,
-direct-method, complete-if, and module-dictionary-entry reduction, and verified
-publication:
+direct-method, complete-if, container-entry, and nested-palette-list reduction,
+and verified publication:
 
 ```text
 Trusted local project + argv reproduction command
@@ -87,7 +87,8 @@ pyrepro/
 │   ├── result_report.py        # optional final JSON/HTML result reports
 │   ├── symbol_reducer.py      # AST source spans and greedy symbol reduction
 │   ├── if_statement_reducer.py # bounded complete-if source reduction
-│   └── container_entry_reducer.py # bounded module-dictionary entry reduction
+│   ├── container_entry_reducer.py # bounded module-dictionary entry reduction
+│   └── nested_palette_reducer.py # bounded nested Palette RGB-list reduction
 ├── scanner/
 │   ├── repository_scanner.py  # retained static repository inventory
 │   ├── ast_analyzer.py        # retained syntax-level facts
@@ -225,10 +226,12 @@ and their JSONL telemetry marks `candidate_rolled_back`.
 import pruning, optional `CoarseFileReducer` directory-group probes,
 `GreedyFileReducer` cleanup, optional complete-symbol then direct-method
 `GreedySymbolReducer` stages, optional `GreedyIfStatementReducer`
-complete-source-if probes, and optional `GreedyContainerEntryReducer` probes.
-All four source stages are disabled by default and
-enabled only with positive `--max-symbol-probes`, `--max-method-probes`, or
-`--max-if-statement-probes`, or `--max-container-entry-probes` values.
+complete-source-if probes, optional container/list/main-guard probes, and
+optional `GreedyNestedPaletteReducer` probes. All optional source stages are
+disabled by default and enabled only with positive `--max-symbol-probes`,
+`--max-method-probes`, `--max-if-statement-probes`,
+`--max-container-entry-probes`, `--max-list-entry-probes`,
+`--max-main-guard-probes`, or `--max-nested-list-entry-probes` values.
 `--symbol-order span-desc` is a deterministic
 advisory ordering, not an acceptance rule. Complete-if probes use a fixed
 span-descending advisory order. They are limited to ordinary source `if`
@@ -271,7 +274,7 @@ The current Fast Mode pipeline composes import pruning, optional coarse file
 probes, greedy file cleanup, and default-disabled source stages under one
 `ExecutionBudget`. Complete-symbol, direct-method, complete-`if`, static
 dictionary-entry, static list-entry, and module-level `__main__` guard stages
-all share the strict failure
+and nested `Palette` list-entry stages all share the strict failure
 oracle, disposable probe workspaces, rollback telemetry, and Publisher-owned
 staging 3/3 verification.
 
@@ -287,6 +290,13 @@ reversed form. It deletes the complete statement including an inline header
 comment, but never an independent preceding comment. It re-discovers candidates
 after accepted edits, while rejected probes remain confined to disposable
 workspaces.
+
+The nested-list stage runs after main-guard reduction. It considers only
+unambiguous direct module-level `Palette(...)` bindings whose first positional
+argument is a multiline, comment-free list of static three-integer tuples. It
+preserves the outer call and unrelated arguments, identifies entries by current
+source ranges rather than tuple values, and re-discovers candidates after
+accepted edits. Whole-list probes split recursively only when rejected.
 
 ## Retained static-analysis foundation
 
