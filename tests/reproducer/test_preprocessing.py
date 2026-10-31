@@ -489,6 +489,56 @@ def test_pipeline_default_keeps_main_guard_stage_disabled(tmp_path: Path):
         )
 
 
+def test_pipeline_runs_nested_list_entry_stage_with_the_shared_budget(
+    tmp_path: Path,
+):
+    """Nested palette entry probes share Fast Mode's budget and telemetry."""
+    _nested_palette_project(tmp_path)
+    digest = tree_digest(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+    budget = ExecutionBudget(20)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = PreprocessingFirstReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            max_import_probes=1,
+            max_coarse_probes=0,
+            max_nested_list_entry_probes=4,
+        ).reduce(workspace, budget=budget)
+
+        assert result.nested_list_entry_reduction is not None
+        nested = result.nested_list_entry_reduction
+        assert nested.candidate_attempts == 1
+        assert nested.accepted_batches == 1
+        assert nested.removed_entries == 2
+        assert result.executions == budget.snapshot().executions_started
+        assert "nested_list_entry" in {record.phase for record in result.probe_records}
+        content = (workspace.root / "target.py").read_text(encoding="utf-8")
+        assert "(1, 2, 3)" not in content
+        assert "Palette(" in content
+
+    assert tree_digest(tmp_path) == digest
+
+
+def test_pipeline_default_keeps_nested_list_entry_stage_disabled(tmp_path: Path):
+    """The nested-list stage must not alter Fast Mode unless opted in."""
+    _nested_palette_project(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+    budget = ExecutionBudget(20)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = PreprocessingFirstReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            max_import_probes=1,
+            max_coarse_probes=0,
+        ).reduce(workspace, budget=budget)
+
+        assert result.nested_list_entry_reduction is None
+        assert "(1, 2, 3)" in (workspace.root / "target.py").read_text(encoding="utf-8")
+
+
 def test_coarse_stops_before_split_when_global_budget_is_exhausted(tmp_path: Path):
     """A rejected group cannot consume extra split probes after its last slot."""
     _nested_project(tmp_path)
@@ -750,6 +800,37 @@ def _main_guard_project(root: Path) -> None:
         "if '__main__' == __name__:\n"
         "    print('also unused')\n\n"
         "def target_failure() -> None:\n"
+        "    raise ValueError('target failure')\n",
+    )
+    _write(
+        root,
+        "tests/test_target.py",
+        "from target import target_failure\n\n"
+        "def test_failure() -> None:\n"
+        "    target_failure()\n",
+    )
+    _write(
+        root,
+        "run_target.py",
+        "from tests.test_target import test_failure\ntest_failure()\n",
+    )
+
+
+def _nested_palette_project(root: Path) -> None:
+    """Create one preserved outer Palette call with removable RGB entries."""
+    _write(root, "tests/__init__.py", "")
+    _write(
+        root,
+        "target.py",
+        "class Palette:\n"
+        "    def __init__(self, colors, *, label):\n"
+        "        self.colors = colors\n\n"
+        "CUSTOM_COLORS = Palette(\n"
+        "    [\n        (1, 2, 3),\n        (4, 5, 6),\n    ],\n"
+        "    label='test',\n"
+        ")\n\n"
+        "def target_failure() -> None:\n"
+        "    assert isinstance(CUSTOM_COLORS.colors, list)\n"
         "    raise ValueError('target failure')\n",
     )
     _write(

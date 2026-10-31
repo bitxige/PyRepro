@@ -16,6 +16,14 @@ experiments remain available through Git history.
 
 ### Added
 
+- Added default-disabled Fast Mode nested `Palette([...])` RGB-list entry
+  reduction through `--max-nested-list-entry-probes`. The stage preserves the
+  direct module-level assignment and outer `Palette` call, identifies static
+  three-integer tuple entries by source position, probes whole entry batches
+  before recursively splitting rejections, and shares the existing
+  Oracle/time budget, rollback telemetry, staging 3/3 verification, and
+  no-clobber publication.
+
 - Added an optional terminal progress display for `pyrepro reduce`. It is
   interactive-terminal-only by default, reports actual Oracle command starts,
   and supports `--progress auto|on|off` without affecting reduction decisions.
@@ -29,7 +37,7 @@ experiments remain available through Git history.
   exact equality guard and its reversed form, runs after module-list reduction,
   and shares the existing Oracle/time budget, rollback telemetry, staging 3/3
   verification, and no-clobber publication.
-  
+
 - Extended default-disabled Fast Mode module-dictionary entry reduction to
   recognize direct integer values for string-keyed dictionaries. Booleans and
   other constant types remain conservatively excluded.

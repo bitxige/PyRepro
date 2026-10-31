@@ -229,6 +229,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     reduce_parser.add_argument(
+        "--max-nested-list-entry-probes",
+        type=int,
+        default=0,
+        help=(
+            "experimental bounded nested Palette RGB-list entry probes after Fast "
+            "Mode main-guard cleanup (default: 0; zero disables)"
+        ),
+    )
+    reduce_parser.add_argument(
         "--symbol-order",
         choices=tuple(order.value for order in SymbolOrder),
         default=SymbolOrder.DISCOVERY.value,
@@ -445,6 +454,7 @@ def _reduce_fast(
                 max_container_entry_probes=args.max_container_entry_probes,
                 max_list_entry_probes=args.max_list_entry_probes,
                 max_main_guard_probes=args.max_main_guard_probes,
+                max_nested_list_entry_probes=args.max_nested_list_entry_probes,
                 symbol_order=SymbolOrder(args.symbol_order),
             )
             with ReductionWorkspace(source) as workspace:
@@ -534,6 +544,10 @@ def _validate_fast_arguments(
         parser.error("--max-list-entry-probes must not be negative with --mode fast")
     if args.max_main_guard_probes < 0:
         parser.error("--max-main-guard-probes must not be negative with --mode fast")
+    if args.max_nested_list_entry_probes < 0:
+        parser.error(
+            "--max-nested-list-entry-probes must not be negative with --mode fast"
+        )
     if (
         args.max_symbol_probes == 0
         and args.max_method_probes == 0
@@ -613,6 +627,14 @@ def _print_fast_publication(
             f"({main_guard_result.accepted_batches} accepted)"
         )
         print(f"Main guards removed: {main_guard_result.removed_guards}")
+    if reduction.nested_list_entry_reduction is not None:
+        nested_result = reduction.nested_list_entry_reduction
+        print(
+            "Nested-list-entry probes: "
+            f"{nested_result.candidate_attempts} "
+            f"({nested_result.accepted_batches} accepted)"
+        )
+        print(f"Nested list entries removed: {nested_result.removed_entries}")
 
 
 def _fast_state_message(publication: PublishingResult) -> str:
