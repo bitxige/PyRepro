@@ -240,9 +240,10 @@ definitions, module/class bodies, and comment/semicolon spans are skipped.
 Deleting a sole statement from its direct parent suite inserts `pass` to retain
 valid syntax. Container-entry probes are limited to source-safe multiline
 module dictionaries with string keys and static values. They first probe whole
-entry batches and recursively split rejected batches; comments, semicolon
-chains, dynamic expressions, unpacking, duplicate keys, and rebound bindings
-are skipped. Exact source-range edits preserve surrounding source. In Fast
+entry batches and recursively split rejected batches. Unsupported and
+comment-adjacent entries are retained unchanged; semicolon chains, dynamic
+expressions, unpacking, duplicate keys, and rebound bindings are skipped.
+Exact source-range edits preserve surrounding source. In Fast
 Mode, all Oracle invocations pass through one
 `ExecutionBudget`: it reserves three executions for final verification and uses
 a monotonic deadline to bound each command timeout. A budgeted pipeline does not

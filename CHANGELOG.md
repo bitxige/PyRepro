@@ -7,6 +7,13 @@ experiments remain available through Git history.
 
 ### Changed
 
+- Expanded default-disabled Fast Mode module-dictionary entry reduction to
+  retain unsupported or comment-adjacent entries while probing independently
+  source-safe entries from the same dictionary. The stage still excludes
+  ambiguous ranges, dynamic values, unpacking, duplicate keys, rebound
+  bindings, and semicolon chains. Its initial LOC telemetry now snapshots the
+  stage input before accepted edits.
+
 - Corrected final Fast Mode report sizing when a published output directory is
   named `output`; ignored-directory filtering now applies only below the
   reported project root.
