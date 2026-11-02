@@ -164,10 +164,12 @@ permission. Container-entry reduction runs after complete-if reduction. It
 only considers unambiguous multiline module-level dictionaries with string
 keys and either string or integer literals (excluding booleans), or direct named
 constructor calls whose
-arguments are static literals. It skips comments, semicolon chains, duplicate
-or rebound bindings, unpacking, and dynamic values. It probes whole entry
-batches and recursively splits rejected batches; static facts never accept a
-deletion on their own. List-entry reduction runs after module-dictionary
+arguments are static literals. It skips semicolon chains, duplicate or rebound
+bindings, unpacking, and dynamic values. A mixed dictionary may still
+contribute independently source-safe entries: unsupported and comment-adjacent
+entries are retained unchanged. It probes whole entry batches and recursively
+splits rejected batches; static facts never accept a deletion on their own.
+List-entry reduction runs after module-dictionary
 reduction. It only considers unambiguous multiline module-level lists whose
 unique entries are tuples of integer literals. It skips comments, semicolon
 chains, duplicate or rebound bindings, dynamic items, and all other list

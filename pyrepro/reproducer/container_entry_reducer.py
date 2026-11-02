@@ -158,6 +158,7 @@ class GreedyContainerEntryReducer:
         """
         started_at = perf_counter()
         initial_files = _python_files(workspace.root, self.ignored_directory_names)
+        initial_python_lines = _python_line_count(initial_files)
         initial, skipped_paths = _discover_workspace(workspace.root, initial_files)
         initial_count = sum(len(item.keys) for item in initial)
         queue: deque[tuple[str, str, tuple[str, ...]]] = deque(
@@ -224,7 +225,7 @@ class GreedyContainerEntryReducer:
         remaining_count = sum(len(item.keys) for item in remaining)
         return ContainerEntryReductionResult(
             baseline_signature=baseline_signature,
-            initial_python_lines=_python_line_count(initial_files),
+            initial_python_lines=initial_python_lines,
             remaining_python_lines=_python_line_count(remaining_files),
             initial_candidates=initial_count,
             remaining_candidates=remaining_count,
@@ -357,10 +358,10 @@ def _supported_dictionaries(
         node = values[0]
         if node.end_lineno is None or node.lineno == node.end_lineno:
             continue
-        if _unsafe_tokens(tokens, node.lineno, node.end_lineno):
+        if _has_semicolon(tokens, node.lineno, node.end_lineno):
             continue
-        entries = _static_entries(node)
-        if entries is None or not entries:
+        entries = _static_entries(node, tokens)
+        if not entries:
             continue
         dictionaries.append(_Dictionary(name, node, entries, data, encoding))
     return tuple(dictionaries)
@@ -400,37 +401,44 @@ def _names_in_target(target: ast.expr) -> tuple[str, ...]:
     return ()
 
 
-def _static_entries(node: ast.Dict) -> tuple[_Entry, ...] | None:
-    """Return safe string-key entries, or ``None`` for dynamic dictionary syntax."""
+def _static_entries(
+    node: ast.Dict, tokens: Collection[tokenize.TokenInfo]
+) -> tuple[_Entry, ...]:
+    """Return an independently source-safe subset of a module dictionary.
+
+    Unsupported values, duplicate keys, and comment-adjacent entries stay in
+    the dictionary. They do not invalidate other independently editable entries.
+    """
     entries: list[_Entry] = []
-    seen: set[str] = set()
+    string_keys = [
+        key.value
+        for key in node.keys
+        if isinstance(key, ast.Constant) and isinstance(key.value, str)
+    ]
+    duplicate_keys = {key for key in string_keys if string_keys.count(key) > 1}
     for key, value in zip(node.keys, node.values, strict=True):
         if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
-            return None
-        if key.value in seen or not _is_supported_entry_value(value):
-            return None
-        seen.add(key.value)
+            continue
+        if key.value in duplicate_keys or not _is_supported_entry_value(value):
+            continue
+        if _has_attached_comment(tokens, key, value):
+            continue
         entries.append(_Entry(key.value, key, value))
     return tuple(entries)
 
 
-def _is_static_value(node: ast.expr) -> bool:
-    """Recognize static literals and direct-name construction with literal arguments."""
+def _is_static_literal(node: ast.expr) -> bool:
+    """Recognize literal-only argument structures without evaluating calls."""
     if isinstance(node, ast.Constant):
         return True
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.UAdd | ast.USub):
         return isinstance(node.operand, ast.Constant)
     if isinstance(node, ast.Tuple | ast.List | ast.Set):
-        return all(_is_static_value(item) for item in node.elts)
+        return all(_is_static_literal(item) for item in node.elts)
     if isinstance(node, ast.Dict):
         return all(
-            key is not None and _is_static_value(key) and _is_static_value(value)
+            key is not None and _is_static_literal(key) and _is_static_literal(value)
             for key, value in zip(node.keys, node.values, strict=True)
-        )
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-        return all(_is_static_value(item) for item in node.args) and all(
-            keyword.arg is not None and _is_static_value(keyword.value)
-            for keyword in node.keywords
         )
     return False
 
@@ -440,17 +448,18 @@ def _is_supported_entry_value(node: ast.expr) -> bool:
 
     Direct constants are limited to ``str`` and exact ``int`` instances.
     In particular, ``bool`` is intentionally excluded even though it is an
-    ``int`` subclass. Other static-value recognition remains limited to direct
-    name calls whose arguments are static.
+    ``int`` subclass. Direct name calls are accepted only when their arguments
+    are literal structures; nested calls and computed expressions are not
+    static-data candidates.
     """
     if isinstance(node, ast.Constant):
         return isinstance(node.value, str) or type(node.value) is int
     return (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and all(_is_static_value(item) for item in node.args)
+        and all(_is_static_literal(item) for item in node.args)
         and all(
-            keyword.arg is not None and _is_static_value(keyword.value)
+            keyword.arg is not None and _is_static_literal(keyword.value)
             for keyword in node.keywords
         )
     )
@@ -539,15 +548,34 @@ def _offset(starts: list[int], line: int, column: int) -> int:
     return starts[line - 1] + column
 
 
-def _unsafe_tokens(
+def _has_attached_comment(
+    tokens: Collection[tokenize.TokenInfo], key: ast.expr, value: ast.expr
+) -> bool:
+    """Return whether a comment has an ambiguous relationship to one entry.
+
+    An inline comment belongs to its own entry, not to the following line. A
+    standalone comment immediately before an entry remains ambiguous and keeps
+    that entry out of the candidate pool.
+    """
+    value_end_line = value.end_lineno or value.lineno
+    for token in tokens:
+        if token.type != tokenize.COMMENT:
+            continue
+        line, column = token.start
+        if key.lineno <= line <= value_end_line:
+            return True
+        if line == key.lineno - 1 and not token.line[:column].strip():
+            return True
+    return False
+
+
+def _has_semicolon(
     tokens: Collection[tokenize.TokenInfo], start: int, end: int
 ) -> bool:
-    """Reject comment and semicolon source that AST ranges would not retain."""
+    """Reject a dictionary containing semicolon syntax not retained by AST."""
     return any(
-        start <= token.start[0] <= end
-        and (
-            token.type == tokenize.COMMENT
-            or (token.type == tokenize.OP and token.string == ";")
-        )
+        token.type == tokenize.OP
+        and token.string == ";"
+        and start <= token.start[0] <= end
         for token in tokens
     )
