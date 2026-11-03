@@ -9,7 +9,7 @@ import pytest
 from pyrepro.reproducer import probe_report
 from pyrepro.reproducer.__main__ import main
 from pyrepro.reproducer.publisher import FastModeTerminalState, PublishingResult
-from pyrepro.reproducer.runner import CommandRunner, ExecutionResult
+from pyrepro.reproducer.runner import CommandRunner, ExecutionResult, _decode_output
 from pyrepro.reproducer.workspace import tree_digest
 
 FAILING_PROJECT = Path(__file__).parents[2] / "examples" / "failing_project"
@@ -40,6 +40,51 @@ def test_runner_reports_timeout(tmp_path: Path):
 
     assert result.timed_out
     assert result.return_code is None
+
+
+def test_runner_decodes_utf8_output_on_a_non_utf8_locale(tmp_path: Path):
+    """UTF-8 child output must not abort reduction on a non-UTF-8 locale."""
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import sys\n"
+        "sys.stdout.buffer.write('中文标准输出\\n'.encode('utf-8'))\n"
+        "sys.stdout.buffer.flush()\n"
+        "raise ValueError('中文错误')\n",
+        encoding="utf-8",
+    )
+    runner = CommandRunner((sys.executable, "child.py"), timeout_seconds=2)
+
+    result = runner.run(tmp_path)
+
+    assert result.stdout == "中文标准输出\n"
+    assert "ValueError" in result.stderr
+
+
+def test_decode_output_decodes_utf8_text():
+    """UTF-8 output decodes even when the locale uses a legacy encoding."""
+    assert _decode_output("中文".encode(), preferred_encoding="gbk") == "中文"
+
+
+def test_decode_output_decodes_locale_encoded_text():
+    """Locale-encoded output decodes after the UTF-8 attempt fails."""
+    assert _decode_output("中文".encode("gbk"), preferred_encoding="gbk") == "中文"
+
+
+def test_decode_output_prefers_utf8_when_both_encodings_decode():
+    """UTF-8 wins when a byte sequence is valid in both encodings."""
+    assert _decode_output("é".encode(), preferred_encoding="cp1252") == "é"
+
+
+def test_decode_output_replaces_undecodable_bytes():
+    """Invalid bytes become replacement characters instead of aborting."""
+    decoded = _decode_output(b"\xff\xfe", preferred_encoding="utf-8")
+
+    assert "\ufffd" in decoded
+
+
+def test_decode_output_normalizes_windows_newlines():
+    """Captured output keeps subprocess text mode's universal newlines."""
+    assert _decode_output(b"a\r\nb\rc", preferred_encoding="utf-8") == "a\nb\nc"
 
 
 def test_runner_notifies_execution_observer_before_each_command(tmp_path: Path):

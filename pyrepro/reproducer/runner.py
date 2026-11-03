@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import locale
 import os
 import subprocess
 from collections.abc import Callable, Sequence
@@ -74,7 +75,10 @@ class CommandRunner:
                 the configured runner timeout. It must be positive when supplied.
 
         Returns:
-            Captured process result or a timeout result.
+            Captured process result or a timeout result. Child output is
+            decoded tolerantly: UTF-8 is tried first, then the platform locale
+            encoding, and undecodable bytes are replaced so that one unusual
+            stream cannot abort reduction.
 
         Raises:
             ValueError: If the supplied working directory is not a directory or
@@ -100,29 +104,71 @@ class CommandRunner:
                 cwd=cwd,
                 env=environment,
                 shell=False,
-                text=True,
                 timeout=effective_timeout,
             )
         except subprocess.TimeoutExpired as error:
             return ExecutionResult(
                 command=self.command,
                 return_code=None,
-                stdout=_as_text(error.stdout),
-                stderr=_as_text(error.stderr),
+                stdout=_decode_output(error.stdout),
+                stderr=_decode_output(error.stderr),
                 timed_out=True,
             )
         return ExecutionResult(
             command=self.command,
             return_code=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
+            stdout=_decode_output(completed.stdout),
+            stderr=_decode_output(completed.stderr),
             timed_out=False,
         )
 
 
-def _as_text(value: str | bytes | None) -> str:
-    if value is None:
+def _decode_output(
+    data: bytes | str | None, *, preferred_encoding: str | None = None
+) -> str:
+    """Decode captured child output without failing on mixed encodings.
+
+    A child process may write UTF-8 chosen by the program or a library, or the
+    platform encoding (for example cp936 on Chinese Windows). Decoding all
+    output with one strict encoding can abort an otherwise valid reduction, so
+    this helper tries UTF-8 first, then the locale encoding, and finally
+    replaces undecodable bytes. UTF-8 is attempted first because locale-encoded
+    text that is not valid UTF-8 fails cleanly, while UTF-8 text decoded as a
+    legacy multi-byte encoding often succeeds as mojibake.
+
+    Args:
+        data: Captured bytes from one output stream, an already decoded string,
+            or ``None``.
+        preferred_encoding: Optional encoding override for tests. Defaults to
+            the process locale encoding.
+
+    Returns:
+        Decoded text with universal newlines, or an empty string for ``None``
+        or empty input.
+    """
+    if data is None:
         return ""
-    if isinstance(value, bytes):
-        return value.decode(errors="replace")
-    return value
+    if isinstance(data, str):
+        return _normalize_newlines(data)
+    if not data:
+        return ""
+    candidates = [
+        "utf-8",
+        preferred_encoding or locale.getpreferredencoding(False),
+    ]
+    attempted: set[str] = set()
+    for encoding in candidates:
+        key = encoding.lower()
+        if key in attempted:
+            continue
+        attempted.add(key)
+        try:
+            return _normalize_newlines(data.decode(encoding))
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return _normalize_newlines(data.decode("utf-8", errors="replace"))
+
+
+def _normalize_newlines(text: str) -> str:
+    """Apply the universal-newline translation used by subprocess text mode."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
