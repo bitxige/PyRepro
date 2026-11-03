@@ -14,6 +14,12 @@ experiments remain available through Git history.
 
 ### Changed
 
+- Bounded command execution in the runner. Each command now receives an empty
+  standard input, a timed-out command has its descendant processes terminated,
+  and each captured output stream retains only its final 4 MiB (including a
+  truncation marker). A command that reads stdin, spawns workers, or prints
+  excessive output no longer blocks or exhausts the reduction process.
+
 - Expanded default-disabled Fast Mode module-dictionary entry reduction to
   retain unsupported or comment-adjacent entries while probing independently
   source-safe entries from the same dictionary. The stage still excludes
