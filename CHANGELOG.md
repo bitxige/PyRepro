@@ -5,6 +5,13 @@ experiments remain available through Git history.
 
 ## [Unreleased]
 
+### Fixed
+
+- Corrected command-output decoding so UTF-8 child output no longer aborts a
+  reduction on a non-UTF-8 locale such as Chinese Windows. The runner now tries
+  UTF-8, falls back to the platform locale encoding, and replaces undecodable
+  bytes instead of failing to capture stdout or stderr.
+
 ### Changed
 
 - Expanded default-disabled Fast Mode module-dictionary entry reduction to
