@@ -3,6 +3,7 @@
 import json
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -85,6 +86,76 @@ def test_decode_output_replaces_undecodable_bytes():
 def test_decode_output_normalizes_windows_newlines():
     """Captured output keeps subprocess text mode's universal newlines."""
     assert _decode_output(b"a\r\nb\rc", preferred_encoding="utf-8") == "a\nb\nc"
+
+
+def test_runner_does_not_wait_for_stdin(tmp_path: Path):
+    """A command that reads stdin sees EOF instead of blocking reduction."""
+    runner = CommandRunner(
+        (sys.executable, "-c", "import sys; print(len(sys.stdin.read()))"),
+        timeout_seconds=2,
+    )
+
+    result = runner.run(tmp_path)
+
+    assert not result.timed_out
+    assert result.stdout.strip() == "0"
+
+
+def test_runner_terminates_descendant_processes_on_timeout(tmp_path: Path):
+    """A timed-out command must not leave background children running."""
+    marker = tmp_path / "grandchild-marker.txt"
+    grandchild = tmp_path / "grandchild.py"
+    grandchild.write_text(
+        "import sys, time\n"
+        "from pathlib import Path\n"
+        "time.sleep(1.0)\n"
+        "Path(sys.argv[1]).write_text('alive', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, sys.argv[2], sys.argv[1]])\n"
+        "time.sleep(10)\n",
+        encoding="utf-8",
+    )
+    runner = CommandRunner(
+        (sys.executable, "child.py", str(marker), str(grandchild)),
+        timeout_seconds=0.5,
+    )
+
+    result = runner.run(tmp_path)
+
+    assert result.timed_out
+    time.sleep(1.5)
+    assert not marker.exists()
+
+
+def test_runner_caps_retained_output_at_the_tail(tmp_path: Path):
+    """Large output keeps the traceback-relevant tail and reports truncation."""
+    runner = CommandRunner(
+        (sys.executable, "-c", "for _ in range(100): print('x' * 100)"),
+        timeout_seconds=5,
+        max_output_bytes=200,
+    )
+
+    result = runner.run(tmp_path)
+
+    assert not result.timed_out
+    assert result.stdout_truncated
+    assert "[pyrepro] output truncated" in result.stdout
+    assert result.stdout.rstrip().endswith("x" * 100)
+    assert len(result.stdout.encode()) <= 200 + len(
+        "\n[pyrepro] output truncated; showing the tail\n"
+    )
+
+
+def test_runner_rejects_non_positive_output_limit():
+    """The retained tail must be a positive byte count."""
+    with pytest.raises(ValueError, match="max_output_bytes"):
+        CommandRunner(
+            (sys.executable, "-c", "pass"), timeout_seconds=2, max_output_bytes=0
+        )
 
 
 def test_runner_notifies_execution_observer_before_each_command(tmp_path: Path):
