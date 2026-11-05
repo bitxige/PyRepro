@@ -70,10 +70,39 @@ def test_budget_does_not_start_more_than_reserved_final_verifications(
     assert error.value.reason is BudgetStopReason.FINAL_VERIFICATION_LIMIT
 
 
+def test_budget_rejects_a_fourth_baseline_execution(tmp_path: Path):
+    """Baseline reservation is an enforceable public-budget invariant."""
+    budget = ExecutionBudget(10)
+    runner = _FakeRunner()
+
+    for _ in range(3):
+        budget.run_oracle(runner, tmp_path, kind=OracleExecutionKind.BASELINE)
+
+    with pytest.raises(BudgetExhaustedError) as error:
+        budget.run_oracle(runner, tmp_path, kind=OracleExecutionKind.BASELINE)
+
+    assert error.value.reason is BudgetStopReason.BASELINE_LIMIT
+    assert budget.snapshot().baseline_executions_started == 3
+
+
 def test_budget_rejects_limits_below_final_reserve():
     """A budget cannot promise final verification without enough slots."""
     with pytest.raises(ValueError, match="baseline and final verification"):
         ExecutionBudget(5)
+
+
+def test_unbounded_budget_preserves_only_the_optional_deadline(tmp_path: Path):
+    """Standard Mode can share deadline control without a command-count cap."""
+    budget = ExecutionBudget(None)
+    runner = _FakeRunner()
+
+    for _ in range(10):
+        budget.run_oracle(runner, tmp_path, kind=OracleExecutionKind.PROBE)
+
+    snapshot = budget.snapshot()
+    assert snapshot.max_oracle_executions is None
+    assert snapshot.remaining_executions is None
+    assert snapshot.executions_started == 10
 
 
 def test_budget_counts_oracle_timeout_as_started(tmp_path: Path):

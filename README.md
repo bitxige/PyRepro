@@ -72,11 +72,9 @@ file can be removed independently. It reports candidate Python files and LOC,
 oracle executions, probe outcomes, removed files, and wall-clock duration. It
 does not claim a globally smallest reproducer.
 
-`--max-granularity` accepts `file` (the default) and `symbol`. Symbol mode first
-runs the selected file strategy, then greedily probes complete module-level
-functions, async functions, and classes within the retained files. AST only
-locates original source ranges, including decorators; the runtime failure oracle
-is still the only acceptance criterion.
+Without `--pytest-node`, Standard Mode preserves the original file-only and
+optional top-level-symbol CLI behavior. Supplying a target node switches
+Standard Mode to the shared production pipeline described below.
 
 `--probe-records <path>` optionally writes one JSONL object for each
 execution-verified candidate probe. Each record includes the phase, proposed
@@ -144,15 +142,13 @@ pyrepro reduce ~/my_project \
 ```
 
 `--mode fast` requires both `--pytest-node` and
-`--max-oracle-executions`. It supports greedy file cleanup and optional,
-default-disabled complete-symbol, direct-method, complete-`if`,
-module-dictionary-entry, module-list-entry, module-level `__main__` guard, and
-nested `Palette([...])` RGB-list entry stages.
-`--max-symbol-probes 0`, `--max-method-probes 0`, and
-`--max-if-statement-probes 0`, `--max-container-entry-probes 0`, and
-`--max-list-entry-probes 0`, and `--max-main-guard-probes 0` disable
-their respective stages; `--max-nested-list-entry-probes 0` also disables the
-nested-list stage. Positive values bound their probes. Method reduction
+`--max-oracle-executions`. Its default production stage configuration enables
+complete-symbol (60), direct-method (265), complete-`if` (60),
+module-dictionary-entry (60), module-list-entry (60), module-level
+`__main__` guard (8), and nested `Palette([...])` RGB-list entry (12) probes.
+The global Oracle budget remains explicit. Passing `0` to any corresponding
+`--max-*-probes` option disables that stage; positive values bound its probes.
+Method reduction
 is deliberately limited to direct methods
 of module-level classes and skips a sole method rather than creating an empty
 class body. Complete-`if` reduction considers only complete source `if`
@@ -187,7 +183,7 @@ preserves the assignment and outer constructor, identifies entries by current
 source location rather than RGB value, and probes complete entry batches before
 recursively splitting rejections. `--symbol-order span-desc`
 probes larger source spans first, with stable path and source-position
-tiebreakers, for every enabled symbol stage. All seven optional source stages share the Fast
+tiebreakers, for every enabled symbol stage. All seven bounded source stages share the Fast
 Mode budget, strict Oracle, rollback, and final Publisher verification; none
 uses `--max-granularity symbol`.
 `--strategy ddmin` and `--max-granularity symbol` remain rejected in Fast Mode,
@@ -212,6 +208,44 @@ Fast Mode prints one of these user-visible outcomes:
 On Linux, publication uses an atomic no-clobber operation. The requested
 output path must be new and outside the source project. Fast Mode fails safely
 on platforms or filesystems that cannot provide that publication guarantee.
+
+## Standard Mode
+
+Standard Mode uses the same production reducer order, strict failure oracle,
+candidate rediscovery, rollback, staging verification, and atomic publication
+as Fast Mode. It differs only in execution policy: it has no default global or
+per-stage search cap. Provide `--pytest-node` to use the shared pipeline:
+
+```bash
+pyrepro reduce ~/my_project \
+  --pytest-node tests/test_example.py::test_failure \
+  --output /tmp/reduced-example \
+  -- python run_target.py
+```
+
+The pipeline runs import pruning, optional coarse deletion, greedy file
+reduction, complete symbols, direct methods, complete `if` statements,
+container entries, list entries, `__main__` guards, and nested palette entries
+in the same order as Fast Mode. A Standard run starts a new sweep from import
+pruning whenever any stage accepted an edit, and stops only when an entire
+sweep accepts no edit. This fixed point is limited to the current production
+reducer set; it is not a claim of global minimality.
+
+Standard Mode keeps the per-command timeout and disposable-workspace/source
+integrity safeguards. It has no default overall time or Oracle cap, so users
+may interrupt a long search with Ctrl+C. Like Fast Mode, it independently
+checks the staging copy three times and publishes only after all three preserve
+the established failure. Supplying `--max-oracle-executions N` and/or
+`--max-time-seconds N` makes either bound explicit for one Standard run; the
+three final verification executions remain reserved when a command-count cap
+is supplied.
+
+For a controlled Fast/Standard comparison, pass the same `--max-*-probes`
+enablement settings to both commands and add
+`--standard-stage-policy fast-config` to Standard Mode. This preserves Fast
+Mode's enabled-stage set while Standard leaves every enabled stage unbounded.
+The default `full` policy intentionally enables all production stages in
+Standard Mode.
 
 ## Read-only import analysis
 

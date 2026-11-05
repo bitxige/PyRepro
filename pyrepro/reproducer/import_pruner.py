@@ -109,13 +109,13 @@ class BatchImportPruner:
         baseline_runs: int = 3,
         expected_text: str | None = None,
         match_mode: FailureMatchMode = FailureMatchMode.STRICT,
-        max_probes: int = 16,
+        max_probes: int | None = 16,
     ) -> None:
         """Configure a bounded import-pruning run."""
         if baseline_runs <= 0:
             raise ValueError("baseline_runs must be positive")
-        if max_probes <= 0:
-            raise ValueError("max_probes must be positive")
+        if max_probes is not None and max_probes <= 0:
+            raise ValueError("max_probes must be positive when provided")
         self.runner = runner
         self.pytest_node = pytest_node
         self.baseline_runs = baseline_runs
@@ -168,7 +168,9 @@ class BatchImportPruner:
         for cohort in (legacy_operations, extended_operations):
             low_risk, risk_marked = _risk_batches(cohort)
             for batch in (low_risk, risk_marked):
-                if not batch or len(records) >= self.max_probes:
+                if not batch or (
+                    self.max_probes is not None and len(records) >= self.max_probes
+                ):
                     continue
                 if budget is not None and not budget.can_start_probe():
                     budget_exhausted = True
@@ -177,7 +179,11 @@ class BatchImportPruner:
                     workspace.root,
                     batch,
                     baseline,
-                    self.max_probes - len(records),
+                    (
+                        None
+                        if self.max_probes is None
+                        else self.max_probes - len(records)
+                    ),
                     budget,
                 )
                 records.extend(new_records)
@@ -227,11 +233,11 @@ class BatchImportPruner:
         root: Path,
         operations: tuple[_Operation, ...],
         baseline: FailureSignature,
-        budget: int,
+        budget: int | None,
         execution_budget: ExecutionBudget | None,
     ) -> tuple[list[ProbeRecord], int, int, bool]:
         """Try one batch, then split rejected batches while budget remains."""
-        if not operations or budget <= 0:
+        if not operations or (budget is not None and budget <= 0):
             return [], 0, 0, False
         current_operations = tuple(
             operation
@@ -257,13 +263,13 @@ class BatchImportPruner:
             left, left_yes, left_no, left_stopped = self._search(
                 root, current_operations[:split], baseline, budget, execution_budget
             )
-            if left_stopped or len(left) >= budget:
+            if left_stopped or (budget is not None and len(left) >= budget):
                 return left, left_yes, left_no, left_stopped
             right, right_yes, right_no, right_stopped = self._search(
                 root,
                 current_operations[split:],
                 baseline,
-                budget - len(left),
+                None if budget is None else budget - len(left),
                 execution_budget,
             )
             return left + right, left_yes + right_yes, left_no + right_no, right_stopped
@@ -274,17 +280,21 @@ class BatchImportPruner:
             return records, 0, 1, False
         split = len(current_operations) // 2
         left, left_yes, left_no, left_stopped = self._search(
-            root, current_operations[:split], baseline, budget - 1, execution_budget
+            root,
+            current_operations[:split],
+            baseline,
+            None if budget is None else budget - 1,
+            execution_budget,
         )
         records.extend(left)
         if left_stopped:
             return records, left_yes, left_no + 1, True
-        if len(records) < budget:
+        if budget is None or len(records) < budget:
             right, right_yes, right_no, right_stopped = self._search(
                 root,
                 current_operations[split:],
                 baseline,
-                budget - len(records),
+                None if budget is None else budget - len(records),
                 execution_budget,
             )
             records.extend(right)

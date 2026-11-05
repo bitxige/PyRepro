@@ -2,17 +2,24 @@
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from pyrepro.reproducer import preprocessing
 from pyrepro.reproducer.budget import ExecutionBudget
-from pyrepro.reproducer.coarse_reducer import CoarseFileReducer
+from pyrepro.reproducer.coarse_reducer import CoarseFileReducer, _children
 from pyrepro.reproducer.failure import (
     FailureMatchMode,
     ReductionOutcome,
     classify_result,
 )
 from pyrepro.reproducer.import_pruner import BatchImportPruner
-from pyrepro.reproducer.preprocessing import PreprocessingFirstReducer
+from pyrepro.reproducer.preprocessing import (
+    PRODUCTION_REDUCER_STAGE_ORDER,
+    FixedPointPipelineReducer,
+    PipelineProbeLimits,
+    PreprocessingFirstReducer,
+)
 from pyrepro.reproducer.runner import CommandRunner
 from pyrepro.reproducer.symbol_reducer import SymbolOrder
 from pyrepro.reproducer.workspace import ReductionWorkspace, tree_digest
@@ -142,6 +149,23 @@ def test_coarse_rejects_parent_then_removes_optional_child(tmp_path: Path):
     assert tree_digest(tmp_path) == digest
 
 
+def test_coarse_child_groups_support_sibling_directories(tmp_path: Path):
+    """Rejected groups split safely when their files have sibling parents."""
+    root = tmp_path / "project"
+    geometry = root / "tactics2d" / "geometry" / "__init__.py"
+    interpolator = root / "tactics2d" / "interpolator" / "__init__.py"
+    for path in (geometry, interpolator):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n", encoding="utf-8")
+
+    groups = _children((geometry, interpolator), root, split=True)
+
+    assert groups == (
+        ((geometry,), True),
+        ((interpolator,), True),
+    )
+
+
 def test_pipeline_continues_when_import_analysis_has_no_editable_operations(
     tmp_path: Path,
 ):
@@ -237,6 +261,157 @@ def test_six_execution_budget_starts_no_search_probe(tmp_path: Path):
         assert "from ballast import Unneeded" in (
             workspace.root / "tests/test_target.py"
         ).read_text(encoding="utf-8")
+
+
+def test_fixed_point_pipeline_restarts_after_an_accepted_earlier_edit(
+    tmp_path: Path,
+):
+    """A later sweep rediscovers candidates from the accepted workspace."""
+    _project(tmp_path, None)
+    digest = tree_digest(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = FixedPointPipelineReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            limits=PipelineProbeLimits(
+                import_pruning=4,
+                coarse=0,
+                symbol=0,
+                method=0,
+                if_statement=0,
+                container_entry=0,
+                list_entry=0,
+                main_guard=0,
+                nested_list_entry=0,
+            ),
+        ).reduce(workspace)
+
+        assert result.fixed_point_reached
+        assert not result.budget_exhausted
+        assert len(result.sweeps) >= 2
+        assert result.sweeps[0].import_pruning.accepted_probes == 1
+        assert result.sweeps[1].import_pruning.baseline_runs == 0
+        assert not (workspace.root / "ballast.py").exists()
+
+    assert tree_digest(tmp_path) == digest
+
+
+def test_later_stage_acceptance_restarts_the_entire_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A later-stage edit must cause a fresh import-first sweep."""
+    runner = CommandRunner(
+        [sys.executable, "-c", "raise ValueError('unused')"], timeout_seconds=2
+    )
+    baseline = preprocessing.FailureSignature(
+        "ValueError", "target", "target.py", "fail"
+    )
+    sweeps: list[int] = []
+
+    def result_for(index: int) -> SimpleNamespace:
+        import_stage = SimpleNamespace(
+            baseline_signature=baseline,
+            baseline_runs=3 if index == 0 else 0,
+            candidate_attempts=1,
+            accepted_probes=0,
+        )
+        file_stage = SimpleNamespace(candidate_attempts=0, accepted_probes=0)
+        method_stage = SimpleNamespace(
+            candidate_attempts=1 if index == 0 else 0,
+            accepted_removals=1 if index == 0 else 0,
+        )
+        return SimpleNamespace(
+            import_pruning=import_stage,
+            coarse_reduction=None,
+            file_reduction=file_stage,
+            symbol_reduction=None,
+            method_reduction=method_stage,
+            if_statement_reduction=None,
+            container_entry_reduction=None,
+            list_entry_reduction=None,
+            main_guard_reduction=None,
+            nested_list_entry_reduction=None,
+            executions=1,
+            wall_clock_seconds=0.0,
+            probe_records=(),
+            source_unchanged=True,
+            budget_exhausted=False,
+        )
+
+    class FakeSweepReducer:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        def reduce(self, *args: object, **kwargs: object) -> SimpleNamespace:
+            del args, kwargs
+            index = len(sweeps)
+            sweeps.append(index)
+            return result_for(index)
+
+    monkeypatch.setattr(preprocessing, "PreprocessingFirstReducer", FakeSweepReducer)
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = FixedPointPipelineReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            limits=PipelineProbeLimits(
+                import_pruning=None,
+                coarse=0,
+                symbol=0,
+                method=None,
+                if_statement=0,
+                container_entry=0,
+                list_entry=0,
+                main_guard=0,
+                nested_list_entry=0,
+            ),
+        ).reduce(workspace)
+
+    assert sweeps == [0, 1]
+    assert result.fixed_point_reached
+    assert len(result.sweeps) == 2
+    assert result.sweeps[1].import_pruning.candidate_attempts == 1
+
+
+def test_standard_policy_has_no_fast_stage_or_global_cap(tmp_path: Path):
+    """``None`` limits run the identical production order without a budget."""
+    _target_only_project(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+    limits = PipelineProbeLimits(
+        import_pruning=None,
+        coarse=None,
+        symbol=None,
+        method=None,
+        if_statement=None,
+        container_entry=None,
+        list_entry=None,
+        main_guard=None,
+        nested_list_entry=None,
+    )
+
+    assert PRODUCTION_REDUCER_STAGE_ORDER == (
+        "import_pruning",
+        "coarse",
+        "file",
+        "symbol",
+        "method",
+        "if_statement",
+        "container_entry",
+        "list_entry",
+        "main_guard",
+        "nested_list_entry",
+    )
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = FixedPointPipelineReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            limits=limits,
+        ).reduce(workspace)
+
+    assert result.fixed_point_reached
+    assert result.executions > 3
+    assert result.sweeps[0].file_reduction.budget_exhausted is False
 
 
 def test_pipeline_runs_optional_budgeted_symbol_stage_after_file_cleanup(

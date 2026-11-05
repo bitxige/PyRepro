@@ -12,6 +12,9 @@ experiments remain available through Git history.
   UTF-8, falls back to the platform locale encoding, and replaces undecodable
   bytes instead of failing to capture stdout or stderr.
 
+- Fixed coarse-group splitting for candidates in sibling directories, preventing
+  Standard Mode from failing while computing relative probe paths.
+
 ### Changed
 
 - Bounded command execution in the runner. Each command now receives an empty
@@ -26,6 +29,27 @@ experiments remain available through Git history.
   ambiguous ranges, dynamic values, unpacking, duplicate keys, rebound
   bindings, and semicolon chains. Its initial LOC telemetry now snapshots the
   stage input before accepted edits.
+
+- Promoted the Rich-tested Fast Mode B budget allocation to the default stage
+  configuration: direct methods use 265 probes, and the production
+  `__main__`-guard and nested Palette-list stages use 8 and 12 probes.
+  Complete-symbol, complete-if, container-entry, and list-entry stages now
+  default to 60 probes. The global Oracle budget remains explicit and every
+  stage can still be disabled with a zero limit.
+
+- Upgraded final reduction reports to schema v2. Unified Fast/Standard reports
+  now serialize fixed-point policy and per-sweep telemetry, and stage LOC
+  removal is accumulated only from that stage's own sweep-local changes.
+  Standard Mode additionally supports `--standard-stage-policy fast-config`
+  for controlled comparisons that match Fast Mode's enabled-stage set while
+  leaving those stages unbounded.
+
+- Unified target-aware Standard Mode and Fast Mode around one production reducer
+  pipeline. Fast Mode retains its shared Oracle/time and per-stage budgets;
+  Standard Mode runs the same stages to a reducer-set fixed point without a
+  default search cap. Both now use staging 3/3 verification and atomic
+  no-clobber publication. The legacy Standard CLI without `--pytest-node`
+  retains its existing behavior.
 
 - Corrected final Fast Mode report sizing when a published output directory is
   named `output`; ignored-directory filtering now applies only below the
