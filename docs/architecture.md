@@ -210,8 +210,8 @@ AST is used only for structural location. Every deletion is accepted only if
 the existing exact failure signature remains after execution. The reducer
 reparses current source after accepted deletions so later ranges are not stale.
 It does not mutate ASTs with `ast.unparse`, delete statements, or claim global
-or symbol-level 1-minimality. Standard Mode continues to use only top-level
-symbols.
+or symbol-level 1-minimality. The legacy Standard CLI without a target node
+continues to use only top-level symbols.
 
 Fast Mode may invoke the same reducer a second time with its deliberately
 narrow direct-method scope. That scope contains only `FunctionDef` and
@@ -222,16 +222,15 @@ and their JSONL telemetry marks `candidate_rolled_back`.
 
 ### Fast Mode composition and publishing
 
-`PreprocessingFirstReducer` shares one workspace and baseline across verified
+`FixedPointPipelineReducer` drives the shared production pipeline. Each sweep
+uses `PreprocessingFirstReducer` to share one workspace and baseline across verified
 import pruning, optional `CoarseFileReducer` directory-group probes,
-`GreedyFileReducer` cleanup, optional complete-symbol then direct-method
-`GreedySymbolReducer` stages, optional `GreedyIfStatementReducer`
-complete-source-if probes, optional container/list/main-guard probes, and
-optional `GreedyNestedPaletteReducer` probes. All optional source stages are
-disabled by default and enabled only with positive `--max-symbol-probes`,
-`--max-method-probes`, `--max-if-statement-probes`,
-`--max-container-entry-probes`, `--max-list-entry-probes`,
-`--max-main-guard-probes`, or `--max-nested-list-entry-probes` values.
+`GreedyFileReducer` cleanup, complete-symbol then direct-method
+`GreedySymbolReducer` stages, `GreedyIfStatementReducer` complete-source-if
+probes, container/list/main-guard probes, and `GreedyNestedPaletteReducer`
+probes. Fast Mode's default stage budgets are 60, 265, 60, 60, 60, 8, and 12
+respectively; users can disable any source stage with its corresponding
+`--max-*-probes 0` option.
 `--symbol-order span-desc` is a deterministic
 advisory ordering, not an acceptance rule. Complete-if probes use a fixed
 span-descending advisory order. They are limited to ordinary source `if`
@@ -246,12 +245,23 @@ expressions, unpacking, duplicate keys, and rebound bindings are skipped.
 Exact source-range edits preserve surrounding source. In Fast
 Mode, all Oracle invocations pass through one
 `ExecutionBudget`: it reserves three executions for final verification and uses
-a monotonic deadline to bound each command timeout. A budgeted pipeline does not
-repeat stage-final checks; it retains only individually accepted workspace changes.
+a monotonic deadline to bound each command timeout. Fast stage limits are
+consumed across every fixed-point sweep. Standard Mode supplies no budget and
+unbounded stage limits by default, but may use an explicit global count and/or
+deadline supplied by the user; both policies restart from import pruning after
+any accepted edit and stop after a complete no-acceptance sweep. A budgeted
+pipeline does not repeat stage-final checks; it retains only individually
+accepted workspace changes.
+
+For controlled comparisons, Standard's `fast-config` stage policy mirrors the
+zero/nonzero enablement from the Fast CLI's `--max-*-probes` settings while
+leaving enabled stages unbounded. Its default `full` policy remains the full
+production pipeline.
 
 The CLI is an orchestration layer. It passes the final workspace and established
 signature to `verify_and_publish`, which creates sibling staging, runs the
-independent final 3/3 there, and atomically publishes only on success. Linux
+independent final 3/3 there, and atomically publishes only on success for both
+Fast and target-aware Standard Mode. Linux
 publication requires `renameat2(RENAME_NOREPLACE)`; there is no unsafe rename
 fallback. The publisher owns output no-clobber and source-integrity rules; the
 CLI maps its structured terminal states to user-facing output and exit status.
@@ -271,9 +281,9 @@ unparsable files skipped during discovery.
 
 ### Fast Mode optional source stages
 
-The current Fast Mode pipeline composes import pruning, optional coarse file
-probes, greedy file cleanup, and default-disabled source stages under one
-`ExecutionBudget`. Complete-symbol, direct-method, complete-`if`, static
+The current shared production pipeline composes import pruning, optional coarse file
+probes, greedy file cleanup, and bounded source stages under one
+`ExecutionBudget` only in Fast Mode. Complete-symbol, direct-method, complete-`if`, static
 dictionary-entry, static list-entry, and module-level `__main__` guard stages
 and nested `Palette` list-entry stages all share the strict failure
 oracle, disposable probe workspaces, rollback telemetry, and Publisher-owned

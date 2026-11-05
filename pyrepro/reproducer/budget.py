@@ -25,6 +25,7 @@ class BudgetStopReason(str, Enum):
     EXECUTION_RESERVE = "execution_reserve"
     EXECUTION_LIMIT = "execution_limit"
     FINAL_VERIFICATION_LIMIT = "final_verification_limit"
+    BASELINE_LIMIT = "baseline_limit"
     TIME_LIMIT = "time_limit"
 
 
@@ -49,10 +50,11 @@ class BudgetSnapshot:
         remaining_seconds: Remaining deadline time, or `None` when unbounded.
     """
 
-    max_oracle_executions: int
+    max_oracle_executions: int | None
     executions_started: int
     final_verifications_started: int
-    remaining_executions: int
+    baseline_executions_started: int
+    remaining_executions: int | None
     remaining_seconds: float | None
 
 
@@ -64,7 +66,9 @@ class ExecutionBudget:
     callers use it only at the single Oracle-command boundary.
 
     Args:
-        max_oracle_executions: Global maximum number of commands that may start.
+        max_oracle_executions: Optional global maximum number of commands that
+            may start. ``None`` leaves command starts unbounded while retaining
+            an optional shared deadline.
         time_budget_seconds: Optional monotonic wall-clock deadline from creation.
         baseline_runs: Commands required to establish a stable baseline.
         final_verification_reserve: Command slots held for final verification.
@@ -76,7 +80,7 @@ class ExecutionBudget:
 
     def __init__(
         self,
-        max_oracle_executions: int,
+        max_oracle_executions: int | None,
         *,
         time_budget_seconds: float | None = None,
         baseline_runs: int = 3,
@@ -89,7 +93,10 @@ class ExecutionBudget:
         if final_verification_reserve <= 0:
             raise ValueError("final_verification_reserve must be positive")
         minimum_executions = baseline_runs + final_verification_reserve
-        if max_oracle_executions < minimum_executions:
+        if (
+            max_oracle_executions is not None
+            and max_oracle_executions < minimum_executions
+        ):
             raise ValueError(
                 "max_oracle_executions must cover baseline and final verification"
             )
@@ -103,9 +110,12 @@ class ExecutionBudget:
         self._started_at = clock()
         self._executions_started = 0
         self._final_verifications_started = 0
+        self._baseline_executions_started = 0
 
-    def remaining_executions(self) -> int:
+    def remaining_executions(self) -> int | None:
         """Return unused command-start slots."""
+        if self.max_oracle_executions is None:
+            return None
         return self.max_oracle_executions - self._executions_started
 
     def remaining_seconds(self) -> float | None:
@@ -120,6 +130,7 @@ class ExecutionBudget:
             max_oracle_executions=self.max_oracle_executions,
             executions_started=self._executions_started,
             final_verifications_started=self._final_verifications_started,
+            baseline_executions_started=self._baseline_executions_started,
             remaining_executions=self.remaining_executions(),
             remaining_seconds=self.remaining_seconds(),
         )
@@ -155,6 +166,8 @@ class ExecutionBudget:
         if effective_timeout <= 0:
             raise BudgetExhaustedError(BudgetStopReason.TIME_LIMIT)
         self._executions_started += 1
+        if kind is OracleExecutionKind.BASELINE:
+            self._baseline_executions_started += 1
         if kind is OracleExecutionKind.FINAL_VERIFICATION:
             self._final_verifications_started += 1
         return runner.run(working_directory, timeout_seconds=effective_timeout)
@@ -163,11 +176,14 @@ class ExecutionBudget:
         if self.remaining_seconds() == 0.0:
             return BudgetStopReason.TIME_LIMIT
         remaining = self.remaining_executions()
+        if kind is OracleExecutionKind.BASELINE:
+            if self._baseline_executions_started >= self.baseline_runs:
+                return BudgetStopReason.BASELINE_LIMIT
         if kind in (OracleExecutionKind.BASELINE, OracleExecutionKind.PROBE):
-            if remaining <= self.final_verification_reserve:
+            if remaining is not None and remaining <= self.final_verification_reserve:
                 return BudgetStopReason.EXECUTION_RESERVE
         else:
-            if remaining <= 0:
+            if remaining is not None and remaining <= 0:
                 return BudgetStopReason.EXECUTION_LIMIT
             if self._final_verifications_started >= self.final_verification_reserve:
                 return BudgetStopReason.FINAL_VERIFICATION_LIMIT

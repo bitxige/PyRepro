@@ -60,6 +60,31 @@ def test_publishes_only_after_three_independent_matching_runs(tmp_path: Path):
     )
 
 
+def test_unbounded_policy_uses_the_same_three_run_publisher(tmp_path: Path):
+    """Standard Mode has no budget but keeps staging and atomic publication."""
+    source = _project(tmp_path / "source")
+    destination = tmp_path / "output"
+    runner = CommandRunner([sys.executable, "reproduce.py"], timeout_seconds=2)
+
+    with ReductionWorkspace(source) as workspace:
+        baseline = _establish_unbudgeted_baseline(runner, workspace.root)
+        result = verify_and_publish(
+            workspace,
+            runner,
+            baseline,
+            FailureMatchMode.STRICT,
+            destination,
+            None,
+            search_budget_exhausted=False,
+        )
+
+    assert result.state is FastModeTerminalState.COMPLETED
+    assert result.verified
+    assert result.budget is None
+    assert len(result.verification_attempts) == 3
+    assert destination.is_dir()
+
+
 def test_existing_output_is_rejected_without_changing_its_contents(tmp_path: Path):
     """An existing user output is never replaced or removed."""
     source = _project(tmp_path / "source")
@@ -427,6 +452,17 @@ def _establish_budgeted_baseline(
         signature = FailureSignature.from_result(result, root)
         assert signature is not None
         signatures.append(signature)
+    assert len(set(signatures)) == 1
+    return signatures[0]
+
+
+def _establish_unbudgeted_baseline(
+    runner: CommandRunner, root: Path
+) -> FailureSignature:
+    """Create the same three-run baseline without an ExecutionBudget."""
+    results = [runner.run(root) for _ in range(3)]
+    signatures = [FailureSignature.from_result(result, root) for result in results]
+    assert all(signature is not None for signature in signatures)
     assert len(set(signatures)) == 1
     return signatures[0]
 

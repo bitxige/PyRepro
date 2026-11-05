@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 from pyrepro.reproducer import probe_report
-from pyrepro.reproducer.__main__ import main
+from pyrepro.reproducer.__main__ import (
+    _FAST_DEFAULT_STAGE_LIMITS,
+    _fast_pipeline_limits,
+    _standard_pipeline_limits,
+    main,
+)
 from pyrepro.reproducer.publisher import FastModeTerminalState, PublishingResult
 from pyrepro.reproducer.runner import CommandRunner, ExecutionResult, _decode_output
 from pyrepro.reproducer.workspace import tree_digest
@@ -16,6 +21,26 @@ from pyrepro.reproducer.workspace import tree_digest
 FAILING_PROJECT = Path(__file__).parents[2] / "examples" / "failing_project"
 TRAINING_PROJECT = Path(__file__).parents[2] / "examples" / "training_failure"
 SYMBOL_PROJECT = Path(__file__).parents[2] / "examples" / "symbol_failure"
+
+
+def _disable_fast_source_stages() -> list[str]:
+    """Return CLI options that isolate one Fast source-stage test."""
+    return [
+        "--max-symbol-probes",
+        "0",
+        "--max-method-probes",
+        "0",
+        "--max-if-statement-probes",
+        "0",
+        "--max-container-entry-probes",
+        "0",
+        "--max-list-entry-probes",
+        "0",
+        "--max-main-guard-probes",
+        "0",
+        "--max-nested-list-entry-probes",
+        "0",
+    ]
 
 
 def test_runner_captures_uncaught_exception_output(tmp_path: Path):
@@ -183,6 +208,21 @@ def test_reduce_help_documents_progress_control(capsys):
     assert error.value.code == 0
     assert "--progress {auto,on,off}" in captured.out
     assert "terminal reduction progress" in captured.out
+
+
+def test_fast_default_stage_limits_match_the_rich_budget_b_configuration():
+    """Keep Fast's production defaults aligned with the approved B allocation."""
+    assert vars(_FAST_DEFAULT_STAGE_LIMITS) == {
+        "import_pruning": 16,
+        "coarse": 16,
+        "symbol": 60,
+        "method": 265,
+        "if_statement": 60,
+        "container_entry": 60,
+        "list_entry": 60,
+        "main_guard": 8,
+        "nested_list_entry": 12,
+    }
 
 
 def test_module_cli_writes_a_verified_reduced_project(tmp_path: Path, capsys):
@@ -718,6 +758,85 @@ def test_fast_mode_cli_publishes_a_verified_reproducer(tmp_path: Path, capsys):
     ).read_text(encoding="utf-8")
 
 
+def test_standard_mode_cli_uses_the_shared_pipeline_and_publisher(
+    tmp_path: Path, capsys
+):
+    """A target-aware Standard run is unbounded but retains final 3/3 staging."""
+    source = tmp_path / "source"
+    output = tmp_path / "standard-output"
+    report_path = tmp_path / "standard.json"
+    _fast_project(source)
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--output",
+            str(output),
+            "--json-report",
+            str(report_path),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert status == 0
+    assert (
+        "Pipeline: unbounded search with the Fast Mode reducer lineup." in captured.out
+    )
+    assert "Final verification: 3/3 passed" in captured.out
+    assert report["mode"] == "standard"
+    assert report["schema_version"] == 2
+    assert report["oracle"]["budget"] is None
+    assert report["pipeline"]["fixed_point_reached"]
+    assert report["pipeline"]["termination_reason"] == "fixed_point"
+    assert report["pipeline"]["sweep_count"] == len(report["sweeps"])
+    assert report["sweeps"][-1]["accepted_edits"] == 0
+    assert report["final_verification"]["completed_runs"] == 3
+    assert report["final_verification"]["same_failure_runs"] == 3
+    assert report["oracle"]["baseline_executions"] == 3
+    assert report["oracle"]["search_executions"] == (
+        report["oracle"]["reduction_executions"] - 3
+    )
+    assert (output / "run_target.py").is_file()
+
+
+def test_standard_mode_honors_an_explicit_global_execution_limit(
+    tmp_path: Path,
+    capsys,
+):
+    """A Standard cap reserves final 3/3 rather than changing mode semantics."""
+    source = tmp_path / "source"
+    output = tmp_path / "standard-output"
+    _fast_project(source)
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--max-oracle-executions",
+            "6",
+            "--output",
+            str(output),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert status == 0
+    assert "explicit search limit" in captured.out
+    assert (output / "run_target.py").is_file()
+
+
 def test_fast_mode_cli_optionally_writes_final_result_reports(tmp_path: Path, capsys):
     """Final JSON and HTML reports describe the verified publication result."""
     source = tmp_path / "source"
@@ -754,8 +873,10 @@ def test_fast_mode_cli_optionally_writes_final_result_reports(tmp_path: Path, ca
     report = json.loads(json_report.read_text(encoding="utf-8"))
 
     assert status == 0
-    assert report["schema_version"] == 1
+    assert report["schema_version"] == 2
     assert report["mode"] == "fast"
+    assert report["pipeline"]["termination_reason"] == "budget_exhausted"
+    assert report["pipeline"]["sweep_count"] == len(report["sweeps"])
     assert report["status"] == {
         "error_message": None,
         "output_path": str(output.resolve()),
@@ -767,6 +888,10 @@ def test_fast_mode_cli_optionally_writes_final_result_reports(tmp_path: Path, ca
     }
     assert report["final_verification"]["same_failure_runs"] == 3
     assert report["final_verification"]["required_runs"] == 3
+    assert report["oracle"]["baseline_executions"] == 3
+    assert report["oracle"]["search_executions"] == (
+        report["oracle"]["reduction_executions"] - 3
+    )
     assert report["oracle"]["total_executions"] == (
         report["oracle"]["reduction_executions"]
         + report["oracle"]["final_verification_executions"]
@@ -780,6 +905,31 @@ def test_fast_mode_cli_optionally_writes_final_result_reports(tmp_path: Path, ca
     assert "JSON report:" in captured.out
     assert "HTML report:" in captured.out
     assert "PyRepro reduction report" in html_report.read_text(encoding="utf-8")
+
+
+def test_standard_fast_config_policy_matches_fast_stage_enablement():
+    """A controlled comparison can share one enabled-stage set."""
+    args = type(
+        "Arguments",
+        (),
+        {
+            "max_import_probes": 16,
+            "max_coarse_probes": 0,
+            "max_symbol_probes": 60,
+            "max_method_probes": 0,
+            "max_if_statement_probes": 8,
+            "max_container_entry_probes": 0,
+            "max_list_entry_probes": 0,
+            "max_main_guard_probes": 4,
+            "max_nested_list_entry_probes": 0,
+            "standard_stage_policy": "fast-config",
+        },
+    )()
+
+    fast = _fast_pipeline_limits(args)
+    standard = _standard_pipeline_limits(args)
+    for name, fast_limit in vars(fast).items():
+        assert (fast_limit > 0) is (getattr(standard, name) is None)
 
 
 def test_fast_mode_cli_minimum_budget_reserves_final_verification(
@@ -842,6 +992,7 @@ def test_fast_mode_cli_optionally_runs_span_ordered_symbol_probes(
             "20",
             "--max-coarse-probes",
             "0",
+            *_disable_fast_source_stages(),
             "--max-symbol-probes",
             "1",
             "--symbol-order",
@@ -891,6 +1042,7 @@ def test_fast_mode_cli_optionally_runs_span_ordered_method_probes(
             "20",
             "--max-coarse-probes",
             "0",
+            *_disable_fast_source_stages(),
             "--max-method-probes",
             "1",
             "--symbol-order",
@@ -942,6 +1094,7 @@ def test_fast_mode_cli_optionally_runs_complete_if_probes(tmp_path: Path, capsys
             "20",
             "--max-coarse-probes",
             "0",
+            *_disable_fast_source_stages(),
             "--max-if-statement-probes",
             "2",
             "--probe-records",
@@ -986,6 +1139,7 @@ def test_fast_mode_cli_optionally_runs_container_entry_probes(tmp_path: Path, ca
             "20",
             "--max-coarse-probes",
             "0",
+            *_disable_fast_source_stages(),
             "--max-container-entry-probes",
             "4",
             "--probe-records",
@@ -1030,6 +1184,7 @@ def test_fast_mode_cli_optionally_runs_list_entry_probes(tmp_path: Path, capsys)
             "20",
             "--max-coarse-probes",
             "0",
+            *_disable_fast_source_stages(),
             "--max-list-entry-probes",
             "4",
             "--probe-records",
@@ -1055,10 +1210,8 @@ def test_fast_mode_cli_optionally_runs_list_entry_probes(tmp_path: Path, capsys)
     assert any(record["phase"] == "list_entry" for record in records)
 
 
-def test_fast_mode_cli_leaves_list_entry_reduction_disabled_by_default(
-    tmp_path: Path, capsys
-):
-    """Do not run list-entry probes unless their explicit budget is positive."""
+def test_fast_mode_cli_runs_list_entry_reduction_by_default(tmp_path: Path, capsys):
+    """Fast's B configuration makes list-entry reduction available by default."""
     source = tmp_path / "source"
     output = tmp_path / "verified-output"
     _fast_list_entry_project(source)
@@ -1088,8 +1241,9 @@ def test_fast_mode_cli_leaves_list_entry_reduction_disabled_by_default(
 
     assert status == 0
     assert "Final verification: 3/3 passed" in captured.out
-    assert "List-entry probes:" not in captured.out
-    assert "(3, 4, 0)" in (output / "target.py").read_text(encoding="utf-8")
+    assert "List-entry probes:" in captured.out
+    assert "List entries removed: 1" in captured.out
+    assert "(3, 4, 0)" not in (output / "target.py").read_text(encoding="utf-8")
     assert tree_digest(source) == source_digest
 
 
@@ -1112,6 +1266,7 @@ def test_fast_mode_cli_optionally_runs_main_guard_probes(tmp_path: Path, capsys)
             "20",
             "--max-coarse-probes",
             "0",
+            *_disable_fast_source_stages(),
             "--max-main-guard-probes",
             "4",
             "--probe-records",
@@ -1137,10 +1292,8 @@ def test_fast_mode_cli_optionally_runs_main_guard_probes(tmp_path: Path, capsys)
     assert any(record["phase"] == "main_guard" for record in records)
 
 
-def test_fast_mode_cli_leaves_main_guard_reduction_disabled_by_default(
-    tmp_path: Path, capsys
-):
-    """Do not run the optional main-guard stage without a positive budget."""
+def test_fast_mode_cli_runs_main_guard_reduction_by_default(tmp_path: Path, capsys):
+    """Fast's B configuration makes main-guard reduction available by default."""
     source = tmp_path / "source"
     output = tmp_path / "verified-output"
     _fast_main_guard_project(source)
@@ -1169,8 +1322,9 @@ def test_fast_mode_cli_leaves_main_guard_reduction_disabled_by_default(
     captured = capsys.readouterr()
 
     assert status == 0
-    assert "Main-guard probes:" not in captured.out
-    assert "if __name__" in (output / "target.py").read_text(encoding="utf-8")
+    assert "Main-guard probes: 1 (1 accepted)" in captured.out
+    assert "Main guards removed: 2" in captured.out
+    assert "if __name__" not in (output / "target.py").read_text(encoding="utf-8")
     assert tree_digest(source) == source_digest
 
 
@@ -1193,6 +1347,7 @@ def test_fast_mode_cli_optionally_runs_nested_list_entry_probes(tmp_path: Path, 
             "20",
             "--max-coarse-probes",
             "0",
+            *_disable_fast_source_stages(),
             "--max-nested-list-entry-probes",
             "4",
             "--probe-records",
@@ -1370,6 +1525,10 @@ def test_fast_mode_cli_rejects_an_unused_symbol_order(tmp_path: Path, capsys):
                 "tests/test_target.py::test_failure",
                 "--max-oracle-executions",
                 "6",
+                "--max-symbol-probes",
+                "0",
+                "--max-method-probes",
+                "0",
                 "--symbol-order",
                 "span-desc",
                 "--",

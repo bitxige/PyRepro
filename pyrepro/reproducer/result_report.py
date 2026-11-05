@@ -19,7 +19,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from pyrepro.reproducer.preprocessing import PreprocessingReductionResult
+from pyrepro.reproducer.preprocessing import (
+    PipelineReductionResult,
+    PreprocessingReductionResult,
+)
 from pyrepro.reproducer.publisher import PublishingResult
 from pyrepro.reproducer.reducer import (
     DEFAULT_IGNORED_DIRECTORY_NAMES,
@@ -27,7 +30,7 @@ from pyrepro.reproducer.reducer import (
 )
 from pyrepro.reproducer.symbol_reducer import SymbolReductionResult
 
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 
 
 def validate_report_paths(
@@ -68,7 +71,7 @@ def validate_report_paths(
 def build_fast_report(
     source_root: Path,
     candidate_root: Path,
-    reduction: PreprocessingReductionResult,
+    reduction: PipelineReductionResult,
     publication: PublishingResult,
     *,
     run_wall_clock_seconds: float,
@@ -87,6 +90,8 @@ def build_fast_report(
         verified publication.
     """
     budget = publication.budget
+    if budget is None:
+        raise ValueError("Fast Mode publication must include a budget snapshot")
     attempts = publication.verification_attempts
     final_verification_executions = max(
         0, budget.executions_started - reduction.executions
@@ -106,6 +111,8 @@ def build_fast_report(
         ),
         "oracle": {
             "total_executions": budget.executions_started,
+            "baseline_executions": reduction.baseline_executions,
+            "search_executions": reduction.search_executions,
             "reduction_executions": reduction.executions,
             "final_verification_executions": final_verification_executions,
             "budget": {
@@ -119,7 +126,9 @@ def build_fast_report(
             "reduction_wall_clock_seconds": reduction.wall_clock_seconds,
             "run_wall_clock_seconds": run_wall_clock_seconds,
         },
+        "pipeline": _pipeline_summary(reduction),
         "stages": _fast_stage_summaries(reduction),
+        "sweeps": _sweep_summaries(reduction),
         "final_verification": {
             "required_runs": 3,
             "completed_runs": len(attempts),
@@ -187,6 +196,8 @@ def build_standard_report(
         ),
         "oracle": {
             "total_executions": reduction_executions + 1,
+            "baseline_executions": file_result.baseline_runs,
+            "search_executions": reduction_executions - file_result.baseline_runs,
             "reduction_executions": reduction_executions,
             "final_verification_executions": 1,
         },
@@ -213,6 +224,91 @@ def build_standard_report(
             and (symbol_result is None or symbol_result.source_unchanged),
             "error_message": None,
             "search_budget_exhausted": False,
+        },
+    }
+
+
+def build_standard_pipeline_report(
+    source_root: Path,
+    reduction: PipelineReductionResult,
+    publication: PublishingResult,
+    *,
+    run_wall_clock_seconds: float,
+) -> dict[str, object]:
+    """Build a report for the unbounded Standard-Mode reducer pipeline.
+
+    Standard Mode uses the same ordered stages as Fast Mode, but no shared
+    execution budget.  Its publication check is three independent strict
+    executions so the only intended behavioral distinction is search bounds.
+    """
+    if publication.output_path is None:
+        raise ValueError("Standard Mode report requires a verified published output")
+    attempts = publication.verification_attempts
+    same_failure_runs = sum(
+        attempt.outcome is not None and attempt.outcome.value == "same_failure"
+        for attempt in attempts
+    )
+    return {
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "mode": "standard",
+        "strategy": "greedy",
+        "size": _size_summary(
+            _project_size(source_root),
+            _project_size(publication.output_path),
+            _project_size(publication.output_path),
+        ),
+        "oracle": {
+            "total_executions": reduction.executions + len(attempts),
+            "baseline_executions": reduction.baseline_executions,
+            "search_executions": reduction.search_executions,
+            "reduction_executions": reduction.executions,
+            "final_verification_executions": len(attempts),
+            "budget": (
+                None
+                if publication.budget is None
+                else {
+                    "max_executions": publication.budget.max_oracle_executions,
+                    "remaining_executions": publication.budget.remaining_executions,
+                    "final_verifications_started": (
+                        publication.budget.final_verifications_started
+                    ),
+                    "remaining_seconds": publication.budget.remaining_seconds,
+                }
+            ),
+        },
+        "timing": {
+            "reduction_wall_clock_seconds": reduction.wall_clock_seconds,
+            "run_wall_clock_seconds": run_wall_clock_seconds,
+        },
+        "pipeline": _pipeline_summary(reduction),
+        "stages": _fast_stage_summaries(reduction),
+        "sweeps": _sweep_summaries(reduction),
+        "final_verification": {
+            "required_runs": 3,
+            "completed_runs": len(attempts),
+            "same_failure_runs": same_failure_runs,
+            "oracle_executions": len(attempts),
+            "passed": same_failure_runs == 3 and len(attempts) == 3,
+            "attempts": [
+                {
+                    "outcome": (
+                        None if attempt.outcome is None else attempt.outcome.value
+                    ),
+                    "return_code": attempt.return_code,
+                    "timed_out": attempt.timed_out,
+                    "failure_signature": _signature_data(attempt.signature),
+                }
+                for attempt in attempts
+            ],
+        },
+        "status": {
+            "terminal_state": publication.state.value,
+            "verified": publication.verified,
+            "published": publication.output_path is not None,
+            "output_path": str(publication.output_path),
+            "source_unchanged": publication.source_unchanged,
+            "error_message": publication.error_message,
+            "search_budget_exhausted": reduction.budget_exhausted,
         },
     }
 
@@ -491,8 +587,10 @@ def _size_summary(
 
 
 def _fast_stage_summaries(
-    reduction: PreprocessingReductionResult,
+    reduction: PreprocessingReductionResult | PipelineReductionResult,
 ) -> list[dict[str, object]]:
+    if isinstance(reduction, PipelineReductionResult):
+        return _aggregate_sweep_stage_summaries(reduction.sweeps)
     stages = [
         _stage_summary("import_pruning", reduction.import_pruning, "accepted_probes"),
     ]
@@ -518,6 +616,128 @@ def _fast_stage_summaries(
         if stage is not None:
             stages.append(_stage_summary(name, stage, accepted_field))
     return stages
+
+
+def _aggregate_sweep_stage_summaries(
+    sweeps: tuple[PreprocessingReductionResult, ...],
+) -> list[dict[str, object]]:
+    """Aggregate stage metrics without attributing other stages' LOC edits."""
+    totals: dict[str, dict[str, object]] = {}
+    order: list[str] = []
+    for sweep in sweeps:
+        for stage in _fast_stage_summaries(sweep):
+            name = str(stage["name"])
+            if name not in totals:
+                totals[name] = {
+                    key: value
+                    for key, value in stage.items()
+                    if key not in {"initial_python_loc", "remaining_python_loc"}
+                }
+                totals[name]["first_initial_python_loc"] = stage["initial_python_loc"]
+                totals[name]["last_remaining_python_loc"] = stage[
+                    "remaining_python_loc"
+                ]
+                order.append(name)
+                continue
+            aggregate = totals[name]
+            for key in ("candidate_attempts", "accepted", "rejected", "executions"):
+                aggregate[key] = int(aggregate[key] or 0) + int(stage[key] or 0)
+            aggregate["wall_clock_seconds"] = float(
+                aggregate["wall_clock_seconds"] or 0.0
+            ) + float(stage["wall_clock_seconds"] or 0.0)
+            aggregate["last_remaining_python_loc"] = stage["remaining_python_loc"]
+            previous_removed = aggregate["loc_removed"]
+            current_removed = stage["loc_removed"]
+            aggregate["loc_removed"] = (
+                None
+                if previous_removed is None and current_removed is None
+                else int(previous_removed or 0) + int(current_removed or 0)
+            )
+            aggregate["budget_exhausted"] = bool(
+                aggregate["budget_exhausted"] or stage["budget_exhausted"]
+            )
+    return [totals[name] for name in order]
+
+
+def _pipeline_summary(reduction: PipelineReductionResult) -> dict[str, object]:
+    """Return policy and stop facts for one fixed-point pipeline run."""
+    stage_limits: list[dict[str, object]] = []
+    configured_limits = {
+        "import_pruning": reduction.limits.import_pruning,
+        "coarse": reduction.limits.coarse,
+        "file": None,
+        "symbol": reduction.limits.symbol,
+        "method": reduction.limits.method,
+        "if_statement": reduction.limits.if_statement,
+        "container_entry": reduction.limits.container_entry,
+        "list_entry": reduction.limits.list_entry,
+        "main_guard": reduction.limits.main_guard,
+        "nested_list_entry": reduction.limits.nested_list_entry,
+    }
+    for name, max_probes in configured_limits.items():
+        stage_limits.append(
+            {
+                "name": name,
+                "enabled": max_probes is None or max_probes > 0,
+                "max_probes": max_probes,
+            }
+        )
+    termination_reason = (
+        "budget_exhausted"
+        if reduction.budget_exhausted
+        else "fixed_point"
+        if reduction.fixed_point_reached
+        else "incomplete"
+    )
+    return {
+        "sweep_count": len(reduction.sweeps),
+        "fixed_point_reached": reduction.fixed_point_reached,
+        "termination_reason": termination_reason,
+        "stage_limits": stage_limits,
+    }
+
+
+def _sweep_summaries(
+    reduction: PipelineReductionResult,
+) -> list[dict[str, object]]:
+    """Serialize per-sweep facts so JSONL reconstruction is never required."""
+    summaries: list[dict[str, object]] = []
+    for number, sweep in enumerate(reduction.sweeps, start=1):
+        stages = _fast_stage_summaries(sweep)
+        first_initial = next(
+            (
+                stage["initial_python_loc"]
+                for stage in stages
+                if stage["initial_python_loc"] is not None
+            ),
+            None,
+        )
+        last_remaining = next(
+            (
+                stage["remaining_python_loc"]
+                for stage in reversed(stages)
+                if stage["remaining_python_loc"] is not None
+            ),
+            None,
+        )
+        baseline_executions = sweep.import_pruning.baseline_runs
+        summaries.append(
+            {
+                "sweep": number,
+                "input_python_loc": first_initial,
+                "output_python_loc": last_remaining,
+                "accepted_edits": sum(int(stage["accepted"] or 0) for stage in stages),
+                "oracle": {
+                    "baseline_executions": baseline_executions,
+                    "search_executions": sweep.executions - baseline_executions,
+                    "total_executions": sweep.executions,
+                },
+                "wall_clock_seconds": sweep.wall_clock_seconds,
+                "budget_exhausted": sweep.budget_exhausted,
+                "stages": stages,
+            }
+        )
+    return summaries
 
 
 def _stage_summary(name: str, result: Any, accepted_field: str) -> dict[str, object]:

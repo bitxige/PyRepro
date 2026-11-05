@@ -1,8 +1,10 @@
 """Tests for optional final JSON and HTML reduction reports."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from pyrepro.reproducer import result_report
 from pyrepro.reproducer.result_report import (
     render_html,
     validate_report_paths,
@@ -160,3 +162,72 @@ def test_write_reports_does_not_overwrite_existing_destination(tmp_path: Path):
         write_reports({"schema_version": 1}, destination, None)
 
     assert destination.read_text(encoding="utf-8") == "existing\n"
+
+
+def test_aggregated_stage_loc_removal_sums_each_sweep_boundary_only():
+    """Other stages' edits cannot inflate an aggregated stage's LOC removal."""
+
+    def stage(initial: int, remaining: int) -> SimpleNamespace:
+        return SimpleNamespace(
+            initial_python_lines=initial,
+            remaining_python_lines=remaining,
+            candidate_attempts=1,
+            accepted_probes=1,
+            rejected_probes=0,
+            executions=1,
+            wall_clock_seconds=0.1,
+            budget_exhausted=False,
+        )
+
+    def sweep(
+        import_initial: int,
+        import_remaining: int,
+        file_initial: int,
+        file_remaining: int,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            import_pruning=stage(import_initial, import_remaining),
+            coarse_reduction=None,
+            file_reduction=stage(file_initial, file_remaining),
+            symbol_reduction=None,
+            method_reduction=None,
+            if_statement_reduction=None,
+            container_entry_reduction=None,
+            list_entry_reduction=None,
+            main_guard_reduction=None,
+            nested_list_entry_reduction=None,
+        )
+
+    stages = result_report._aggregate_sweep_stage_summaries(
+        (
+            sweep(100, 90, 90, 50),
+            sweep(50, 45, 45, 40),
+        )
+    )
+
+    assert stages == [
+        {
+            "name": "import_pruning",
+            "candidate_attempts": 2,
+            "accepted": 2,
+            "rejected": 0,
+            "executions": 2,
+            "wall_clock_seconds": pytest.approx(0.2),
+            "loc_removed": 15,
+            "budget_exhausted": False,
+            "first_initial_python_loc": 100,
+            "last_remaining_python_loc": 45,
+        },
+        {
+            "name": "file",
+            "candidate_attempts": 2,
+            "accepted": 2,
+            "rejected": 0,
+            "executions": 2,
+            "wall_clock_seconds": pytest.approx(0.2),
+            "loc_removed": 45,
+            "budget_exhausted": False,
+            "first_initial_python_loc": 90,
+            "last_remaining_python_loc": 40,
+        },
+    ]

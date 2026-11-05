@@ -6,6 +6,7 @@ import shutil
 import tempfile
 from collections import deque
 from dataclasses import dataclass
+from os.path import commonpath
 from pathlib import Path
 from time import perf_counter
 
@@ -48,9 +49,9 @@ class CoarseReductionResult:
 class CoarseFileReducer:
     """Try path-structure groups, splitting failures within a fixed budget."""
 
-    def __init__(self, runner: CommandRunner, *, max_probes: int = 16) -> None:
+    def __init__(self, runner: CommandRunner, *, max_probes: int | None = 16) -> None:
         """Configure the trusted command runner and coarse probe budget."""
-        if max_probes < 0:
+        if max_probes is not None and max_probes < 0:
             raise ValueError("max_probes must not be negative")
         self.runner = runner
         self.max_probes = max_probes
@@ -75,7 +76,7 @@ class CoarseFileReducer:
         accepted = 0
         budget_exhausted = False
         seen: set[frozenset[Path]] = set()
-        while queue and len(records) < self.max_probes:
+        while queue and (self.max_probes is None or len(records) < self.max_probes):
             if budget is not None and not budget.can_start_probe():
                 budget_exhausted = True
                 break
@@ -180,8 +181,7 @@ def _children(
 ) -> tuple[tuple[tuple[Path, ...], bool], ...]:
     if len(files) <= 1:
         return ()
-    parents = {path.parent for path in files}
-    common = min(parents, key=lambda item: len(item.parts))
+    common = Path(commonpath(tuple(path.parent for path in files)))
     groups: dict[str, list[Path]] = {}
     for path in files:
         relative = path.relative_to(common)

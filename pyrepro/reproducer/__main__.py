@@ -19,8 +19,9 @@ from pyrepro.reproducer.import_pruner import (
     format_import_pruning_summary,
 )
 from pyrepro.reproducer.preprocessing import (
-    PreprocessingFirstReducer,
-    PreprocessingReductionResult,
+    FixedPointPipelineReducer,
+    PipelineProbeLimits,
+    PipelineReductionResult,
 )
 from pyrepro.reproducer.probe_report import (
     validate_probe_report_path,
@@ -40,6 +41,7 @@ from pyrepro.reproducer.reducer import (
 )
 from pyrepro.reproducer.result_report import (
     build_fast_report,
+    build_standard_pipeline_report,
     build_standard_report,
     validate_report_paths,
     write_reports,
@@ -58,6 +60,17 @@ from pyrepro.scanner.import_analyzer import (
 )
 
 _DEFAULT_OUTPUT_DIRECTORY_NAME = ".pyrepro-output"
+_FAST_DEFAULT_STAGE_LIMITS = PipelineProbeLimits(
+    import_pruning=16,
+    coarse=16,
+    symbol=60,
+    method=265,
+    if_statement=60,
+    container_entry=60,
+    list_entry=60,
+    main_guard=8,
+    nested_list_entry=12,
+)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -148,93 +161,105 @@ def main(argv: Sequence[str] | None = None) -> int:
     reduce_parser.add_argument(
         "--pytest-node",
         help=(
-            "target test node required by --mode fast as FILE::TEST or "
-            "FILE::CLASS::TEST"
+            "target test node required by --mode fast and used by Standard "
+            "Mode's unified pipeline as FILE::TEST or FILE::CLASS::TEST"
+        ),
+    )
+    reduce_parser.add_argument(
+        "--standard-stage-policy",
+        choices=("full", "fast-config"),
+        default="full",
+        help=(
+            "Standard Mode stage enablement: full enables every production "
+            "stage; fast-config mirrors zero/nonzero --max-*-probes settings "
+            "while leaving enabled stages unbounded (default: full)"
         ),
     )
     reduce_parser.add_argument(
         "--max-oracle-executions",
         type=int,
-        help="global Oracle-command limit required by --mode fast (minimum: 6)",
+        help=(
+            "optional global Oracle-command limit; required by --mode fast (minimum: 6)"
+        ),
     )
     reduce_parser.add_argument(
         "--max-time-seconds",
         type=float,
-        help="optional shared wall-clock deadline for --mode fast",
+        help="optional shared wall-clock deadline for target-aware reduction",
     )
     reduce_parser.add_argument(
         "--max-import-probes",
         type=int,
-        default=16,
+        default=_FAST_DEFAULT_STAGE_LIMITS.import_pruning,
         help="bounded import-pruning probes for --mode fast (default: 16)",
     )
     reduce_parser.add_argument(
         "--max-coarse-probes",
         type=int,
-        default=16,
+        default=_FAST_DEFAULT_STAGE_LIMITS.coarse,
         help="bounded coarse file probes for --mode fast (default: 16; zero disables)",
     )
     reduce_parser.add_argument(
         "--max-symbol-probes",
         type=int,
-        default=0,
+        default=_FAST_DEFAULT_STAGE_LIMITS.symbol,
         help=(
             "bounded complete-symbol probes after Fast Mode file cleanup "
-            "(default: 0; zero disables)"
+            "(default: 60; zero disables)"
         ),
     )
     reduce_parser.add_argument(
         "--max-method-probes",
         type=int,
-        default=0,
+        default=_FAST_DEFAULT_STAGE_LIMITS.method,
         help=(
             "bounded direct-class-method probes after Fast Mode symbol cleanup "
-            "(default: 0; zero disables)"
+            "(default: 265; zero disables)"
         ),
     )
     reduce_parser.add_argument(
         "--max-if-statement-probes",
         type=int,
-        default=0,
+        default=_FAST_DEFAULT_STAGE_LIMITS.if_statement,
         help=(
             "experimental bounded complete-if probes after Fast Mode method cleanup "
-            "(default: 0; zero disables)"
+            "(default: 60; zero disables)"
         ),
     )
     reduce_parser.add_argument(
         "--max-container-entry-probes",
         type=int,
-        default=0,
+        default=_FAST_DEFAULT_STAGE_LIMITS.container_entry,
         help=(
             "experimental bounded module-dictionary entry probes after Fast Mode "
-            "complete-if cleanup (default: 0; zero disables)"
+            "complete-if cleanup (default: 60; zero disables)"
         ),
     )
     reduce_parser.add_argument(
         "--max-list-entry-probes",
         type=int,
-        default=0,
+        default=_FAST_DEFAULT_STAGE_LIMITS.list_entry,
         help=(
             "experimental bounded module-list entry probes after Fast Mode "
-            "container-entry cleanup (default: 0; zero disables)"
+            "container-entry cleanup (default: 60; zero disables)"
         ),
     )
     reduce_parser.add_argument(
         "--max-main-guard-probes",
         type=int,
-        default=0,
+        default=_FAST_DEFAULT_STAGE_LIMITS.main_guard,
         help=(
             "experimental bounded module-level __main__ guard probes after Fast "
-            "Mode list-entry cleanup (default: 0; zero disables)"
+            "Mode list-entry cleanup (default: 8; zero disables)"
         ),
     )
     reduce_parser.add_argument(
         "--max-nested-list-entry-probes",
         type=int,
-        default=0,
+        default=_FAST_DEFAULT_STAGE_LIMITS.nested_list_entry,
         help=(
             "experimental bounded nested Palette RGB-list entry probes after Fast "
-            "Mode main-guard cleanup (default: 0; zero disables)"
+            "Mode main-guard cleanup (default: 12; zero disables)"
         ),
     )
     reduce_parser.add_argument(
@@ -321,6 +346,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             html_report,
             command,
         )
+    if args.strategy == "greedy" and args.pytest_node is not None:
+        return _reduce_standard_pipeline(
+            parser,
+            args,
+            source,
+            output,
+            probe_report,
+            json_report,
+            html_report,
+            command,
+        )
     started_at = perf_counter()
     try:
         with TerminalProgress(args.progress) as progress:
@@ -353,6 +389,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     destination,
                     match_mode,
                 )
+    except BudgetExhaustedError as error:
+        parser.error(f"Standard Mode stopped before verification: {error}")
     except (OSError, UnstableBaselineError, ValueError) as error:
         parser.error(str(error))
 
@@ -409,6 +447,113 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+def _reduce_standard_pipeline(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    source: Path,
+    output: Path,
+    probe_report: Path | None,
+    json_report: Path | None,
+    html_report: Path | None,
+    command: Sequence[str],
+) -> int:
+    """Run the complete reducer lineup without Fast Mode's shared budget.
+
+    A supplied pytest node opts Standard Mode into the same ordered, target-aware
+    stages as Fast Mode.  The reducers receive no per-stage or global probe
+    bounds; the three-run final verification remains strict.
+    """
+    started_at = perf_counter()
+    try:
+        match_mode = FailureMatchMode(args.failure_match)
+        budget = (
+            None
+            if args.max_oracle_executions is None and args.max_time_seconds is None
+            else ExecutionBudget(
+                args.max_oracle_executions,
+                time_budget_seconds=args.max_time_seconds,
+            )
+        )
+        with TerminalProgress(args.progress) as progress:
+            runner = CommandRunner(
+                command,
+                timeout_seconds=args.timeout_seconds,
+                on_execution_start=progress.advance,
+            )
+            reducer = FixedPointPipelineReducer(
+                runner,
+                args.pytest_node,
+                expected_text=args.expect,
+                match_mode=match_mode,
+                limits=_standard_pipeline_limits(args),
+                symbol_order=SymbolOrder(args.symbol_order),
+            )
+            with ReductionWorkspace(source) as workspace:
+                reduction = reducer.reduce(workspace, budget=budget)
+                if not reduction.source_unchanged:
+                    raise UnstableBaselineError("the protected source changed")
+                publication = verify_and_publish(
+                    workspace,
+                    runner,
+                    reduction.baseline_signature,
+                    match_mode,
+                    output,
+                    budget,
+                    search_budget_exhausted=reduction.budget_exhausted,
+                )
+    except (OSError, UnstableBaselineError, ValueError) as error:
+        parser.error(str(error))
+
+    if not publication.verified or publication.output_path is None:
+        parser.error(_fast_state_message(publication))
+    destination = publication.output_path
+
+    if probe_report is not None:
+        try:
+            write_probe_records(probe_report, reduction)
+        except OSError as error:
+            parser.error(
+                "failed to write probe records; the verified reduced project "
+                f"remains at {destination}: {error}"
+            )
+
+    report = build_standard_pipeline_report(
+        source,
+        reduction,
+        publication,
+        run_wall_clock_seconds=perf_counter() - started_at,
+    )
+    if json_report is not None or html_report is not None:
+        try:
+            write_reports(report, json_report, html_report)
+        except OSError as error:
+            parser.error(
+                "failed to write final result report; the verified reduced project "
+                f"remains at {destination}: {error}"
+            )
+
+    if reduction.budget_exhausted:
+        print(
+            "Standard Mode stopped reduction at the explicit search limit, "
+            "then published its final 3/3-verified candidate."
+        )
+    else:
+        print("Standard Mode completed successfully.")
+    print(_standard_pipeline_status(reduction, budget))
+    print("Final verification: 3/3 passed")
+    print(f"Reducer Oracle executions: {reduction.executions}")
+    print(f"Total Oracle executions: {report['oracle']['total_executions']}")
+    print(f"Total wall-clock seconds: {report['timing']['run_wall_clock_seconds']:.3f}")
+    print(f"Reduced project: {destination}")
+    if probe_report is not None:
+        print(f"Probe records: {probe_report}")
+    if json_report is not None:
+        print(f"JSON report: {json_report}")
+    if html_report is not None:
+        print(f"HTML report: {html_report}")
+    return 0
+
+
 def _reduce_fast(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
@@ -441,20 +586,12 @@ def _reduce_fast(
                 timeout_seconds=args.timeout_seconds,
                 on_execution_start=progress.advance,
             )
-            reducer = PreprocessingFirstReducer(
+            reducer = FixedPointPipelineReducer(
                 runner,
                 args.pytest_node,
                 expected_text=args.expect,
                 match_mode=match_mode,
-                max_import_probes=args.max_import_probes,
-                max_coarse_probes=args.max_coarse_probes,
-                max_symbol_probes=args.max_symbol_probes,
-                max_method_probes=args.max_method_probes,
-                max_if_statement_probes=args.max_if_statement_probes,
-                max_container_entry_probes=args.max_container_entry_probes,
-                max_list_entry_probes=args.max_list_entry_probes,
-                max_main_guard_probes=args.max_main_guard_probes,
-                max_nested_list_entry_probes=args.max_nested_list_entry_probes,
+                limits=_fast_pipeline_limits(args),
                 symbol_order=SymbolOrder(args.symbol_order),
             )
             with ReductionWorkspace(source) as workspace:
@@ -462,7 +599,7 @@ def _reduce_fast(
                 publication = verify_and_publish(
                     workspace,
                     runner,
-                    reduction.import_pruning.baseline_signature,
+                    reduction.baseline_signature,
                     match_mode,
                     output,
                     budget,
@@ -514,6 +651,53 @@ def _reduce_fast(
     return 0 if publication.verified and report_written else 1
 
 
+def _fast_pipeline_limits(args: argparse.Namespace) -> PipelineProbeLimits:
+    """Return Fast Mode's explicit, bounded stage policy."""
+    return PipelineProbeLimits(
+        import_pruning=args.max_import_probes,
+        coarse=args.max_coarse_probes,
+        symbol=args.max_symbol_probes,
+        method=args.max_method_probes,
+        if_statement=args.max_if_statement_probes,
+        container_entry=args.max_container_entry_probes,
+        list_entry=args.max_list_entry_probes,
+        main_guard=args.max_main_guard_probes,
+        nested_list_entry=args.max_nested_list_entry_probes,
+    )
+
+
+def _standard_pipeline_limits(args: argparse.Namespace) -> PipelineProbeLimits:
+    """Return Standard's full or Fast-config-matched unbounded stage policy."""
+    if args.standard_stage_policy == "full":
+        return PipelineProbeLimits(
+            import_pruning=None,
+            coarse=None,
+            symbol=None,
+            method=None,
+            if_statement=None,
+            container_entry=None,
+            list_entry=None,
+            main_guard=None,
+            nested_list_entry=None,
+        )
+    fast_limits = _fast_pipeline_limits(args)
+    return PipelineProbeLimits(
+        **{name: None if value > 0 else 0 for name, value in vars(fast_limits).items()}
+    )
+
+
+def _standard_pipeline_status(
+    reduction: PipelineReductionResult,
+    budget: ExecutionBudget | None,
+) -> str:
+    """Describe Standard's actual search policy and termination truthfully."""
+    if reduction.budget_exhausted:
+        return "Pipeline: explicit Standard search budget exhausted."
+    if budget is None:
+        return "Pipeline: unbounded search with the Fast Mode reducer lineup."
+    return "Pipeline: explicit Standard search budget completed at a fixed point."
+
+
 def _validate_fast_arguments(
     parser: argparse.ArgumentParser, args: argparse.Namespace
 ) -> None:
@@ -561,7 +745,7 @@ def _validate_fast_arguments(
 
 def _print_fast_publication(
     publication: PublishingResult,
-    reduction: PreprocessingReductionResult,
+    reduction: PipelineReductionResult,
 ) -> None:
     """Print one clear result without changing publisher terminal semantics."""
     if publication.state is FastModeTerminalState.COMPLETED:
@@ -582,59 +766,84 @@ def _print_fast_publication(
     print(f"Reducer Oracle executions: {reduction.executions}")
     print(f"Total Oracle executions: {publication.budget.executions_started}")
     print(f"Search probes: {len(reduction.probe_records)}")
-    if reduction.symbol_reduction is not None:
-        symbol_result = reduction.symbol_reduction
+    symbol_result = _aggregate_pipeline_stage(reduction, "symbol_reduction")
+    if symbol_result is not None:
         print(
             "Symbol probes: "
-            f"{symbol_result.candidate_attempts} "
-            f"({symbol_result.accepted_removals} accepted)"
+            f"{symbol_result['candidate_attempts']} "
+            f"({symbol_result['accepted_removals']} accepted)"
         )
-    if reduction.method_reduction is not None:
-        method_result = reduction.method_reduction
+    method_result = _aggregate_pipeline_stage(reduction, "method_reduction")
+    if method_result is not None:
         print(
             "Method probes: "
-            f"{method_result.candidate_attempts} "
-            f"({method_result.accepted_removals} accepted)"
+            f"{method_result['candidate_attempts']} "
+            f"({method_result['accepted_removals']} accepted)"
         )
-    if reduction.if_statement_reduction is not None:
-        if_result = reduction.if_statement_reduction
+    if_result = _aggregate_pipeline_stage(reduction, "if_statement_reduction")
+    if if_result is not None:
         print(
             "If-statement probes: "
-            f"{if_result.candidate_attempts} "
-            f"({if_result.accepted_removals} accepted)"
+            f"{if_result['candidate_attempts']} "
+            f"({if_result['accepted_removals']} accepted)"
         )
-    if reduction.container_entry_reduction is not None:
-        container_result = reduction.container_entry_reduction
+    container_result = _aggregate_pipeline_stage(reduction, "container_entry_reduction")
+    if container_result is not None:
         print(
             "Container-entry probes: "
-            f"{container_result.candidate_attempts} "
-            f"({container_result.accepted_batches} accepted)"
+            f"{container_result['candidate_attempts']} "
+            f"({container_result['accepted_batches']} accepted)"
         )
-        print(f"Container entries removed: {container_result.removed_entries}")
-    if reduction.list_entry_reduction is not None:
-        list_result = reduction.list_entry_reduction
+        print(f"Container entries removed: {container_result['removed_entries']}")
+    list_result = _aggregate_pipeline_stage(reduction, "list_entry_reduction")
+    if list_result is not None:
         print(
             "List-entry probes: "
-            f"{list_result.candidate_attempts} "
-            f"({list_result.accepted_batches} accepted)"
+            f"{list_result['candidate_attempts']} "
+            f"({list_result['accepted_batches']} accepted)"
         )
-        print(f"List entries removed: {list_result.removed_entries}")
-    if reduction.main_guard_reduction is not None:
-        main_guard_result = reduction.main_guard_reduction
+        print(f"List entries removed: {list_result['removed_entries']}")
+    main_guard_result = _aggregate_pipeline_stage(reduction, "main_guard_reduction")
+    if main_guard_result is not None:
         print(
             "Main-guard probes: "
-            f"{main_guard_result.candidate_attempts} "
-            f"({main_guard_result.accepted_batches} accepted)"
+            f"{main_guard_result['candidate_attempts']} "
+            f"({main_guard_result['accepted_batches']} accepted)"
         )
-        print(f"Main guards removed: {main_guard_result.removed_guards}")
-    if reduction.nested_list_entry_reduction is not None:
-        nested_result = reduction.nested_list_entry_reduction
+        print(f"Main guards removed: {main_guard_result['removed_guards']}")
+    nested_result = _aggregate_pipeline_stage(reduction, "nested_list_entry_reduction")
+    if nested_result is not None:
         print(
             "Nested-list-entry probes: "
-            f"{nested_result.candidate_attempts} "
-            f"({nested_result.accepted_batches} accepted)"
+            f"{nested_result['candidate_attempts']} "
+            f"({nested_result['accepted_batches']} accepted)"
         )
-        print(f"Nested list entries removed: {nested_result.removed_entries}")
+        print(f"Nested list entries removed: {nested_result['removed_entries']}")
+
+
+def _aggregate_pipeline_stage(
+    reduction: PipelineReductionResult,
+    attribute: str,
+) -> dict[str, int] | None:
+    """Aggregate printable stage counters over all fixed-point sweeps."""
+    matching = [
+        stage
+        for sweep in reduction.sweeps
+        if (stage := getattr(sweep, attribute)) is not None
+    ]
+    if not matching:
+        return None
+    counter_names = (
+        "candidate_attempts",
+        "accepted_removals",
+        "accepted_batches",
+        "removed_entries",
+        "removed_guards",
+    )
+    return {
+        name: sum(int(getattr(stage, name, 0)) for stage in matching)
+        for name in counter_names
+    }
 
 
 def _fast_state_message(publication: PublishingResult) -> str:

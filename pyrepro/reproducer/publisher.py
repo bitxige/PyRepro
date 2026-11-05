@@ -79,7 +79,7 @@ class PublishingResult:
     output_path: Path | None
     verification_attempts: tuple[FinalVerificationAttempt, ...]
     source_unchanged: bool
-    budget: BudgetSnapshot
+    budget: BudgetSnapshot | None
     error_message: str | None = None
 
     @property
@@ -97,15 +97,15 @@ def verify_and_publish(
     baseline_signature: FailureSignature,
     match_mode: FailureMatchMode,
     destination: Path,
-    budget: ExecutionBudget,
+    budget: ExecutionBudget | None,
     *,
     search_budget_exhausted: bool,
 ) -> PublishingResult:
     """Independently verify a staged workspace and atomically publish it.
 
-    The current workspace is copied to a sibling staging directory. Exactly
-    three final-verification commands are attempted through the shared budget.
-    A destination is created only after all three retain the baseline failure
+    The current workspace is copied to a sibling staging directory. Up to three
+    final-verification commands are attempted through the shared budget. A
+    destination is created only after all three retain the baseline failure
     and the source digest remains unchanged. Any unpublished staging directory
     is removed before returning.
 
@@ -115,7 +115,8 @@ def verify_and_publish(
         baseline_signature: Stable failure signature established before search.
         match_mode: Failure identity required for final verification.
         destination: New directory to receive the verified reproducer.
-        budget: Shared Fast-Mode budget with final slots reserved.
+        budget: Shared Fast-Mode budget with final slots reserved, or ``None``
+            for Standard Mode's unbounded execution policy.
         search_budget_exhausted: Whether earlier reduction stopped for budget.
 
     Returns:
@@ -155,8 +156,12 @@ def verify_and_publish(
 
         for _ in range(3):
             try:
-                execution = budget.run_oracle(
-                    runner, staging, kind=OracleExecutionKind.FINAL_VERIFICATION
+                execution = (
+                    runner.run(staging)
+                    if budget is None
+                    else budget.run_oracle(
+                        runner, staging, kind=OracleExecutionKind.FINAL_VERIFICATION
+                    )
                 )
             except BudgetExhaustedError as error:
                 return _with_source_precedence(
@@ -297,7 +302,7 @@ def _with_source_precedence(
     state: FastModeTerminalState,
     attempts: list[FinalVerificationAttempt],
     workspace: ReductionWorkspace,
-    budget: ExecutionBudget,
+    budget: ExecutionBudget | None,
     error_message: str | None = None,
 ) -> PublishingResult:
     """Return a failure result while preserving source-integrity precedence."""
@@ -312,7 +317,7 @@ def _result(
     output_path: Path | None,
     attempts: list[FinalVerificationAttempt],
     workspace: ReductionWorkspace,
-    budget: ExecutionBudget,
+    budget: ExecutionBudget | None,
     error_message: str | None = None,
 ) -> PublishingResult:
     """Construct one immutable publishing result from current observations."""
@@ -321,6 +326,6 @@ def _result(
         output_path=output_path,
         verification_attempts=tuple(attempts),
         source_unchanged=workspace.source_is_unchanged(),
-        budget=budget.snapshot(),
+        budget=None if budget is None else budget.snapshot(),
         error_message=error_message,
     )
