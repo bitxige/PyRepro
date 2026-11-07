@@ -1,0 +1,14 @@
+{
+  "case_id": "case_nested_list",
+  "provenance": "fixture",
+  "expected_reducer": "nested_list_entry",
+  "input_root": "input",
+  "adapter_path": "input/benchmarks/adapter.py",
+  "oracle_command": ["python", "benchmarks/adapter.py"],
+  "failure_signature": {"exception_type": "ValueError", "message": "nested palette fixture failure", "source_file": "app.py", "function": "require_target_color"},
+  "python_version": "3.10.18",
+  "dependencies": "Python standard library only",
+  "input_digest": "b9c95c9288b57cda2ca8b6973e320029b47d2da5cae5e83b0915a81dc87b96eb",
+  "baseline_verification": "strict same failure, 3/3",
+  "source_unchanged": true
+}

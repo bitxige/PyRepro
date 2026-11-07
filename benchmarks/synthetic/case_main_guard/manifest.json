@@ -1,0 +1,14 @@
+{
+  "case_id": "case_main_guard",
+  "provenance": "fixture",
+  "expected_reducer": "main_guard",
+  "input_root": "input",
+  "adapter_path": "input/benchmarks/adapter.py",
+  "oracle_command": ["python", "benchmarks/adapter.py"],
+  "failure_signature": {"exception_type": "ValueError", "message": "main guard fixture failure", "source_file": "app.py", "function": "trigger"},
+  "python_version": "3.10.18",
+  "dependencies": "Python standard library only",
+  "input_digest": "6b1949274f05938b2eadc38d33fda2d1e5657da34234b8772eeb96bf16950695",
+  "baseline_verification": "strict same failure, 3/3",
+  "source_unchanged": true
+}

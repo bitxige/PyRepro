@@ -60,6 +60,12 @@ experiments remain available through Git history.
 
 ### Added
 
+- Added five deterministic, standard-library-only synthetic benchmark fixtures
+  for direct-method, complete-if, module-container/list-entry, `__main__`
+  guard, and nested `Palette` RGB-list reduction. Each fixture records a
+  strict 3/3 baseline and is qualified only when its target production stage
+  accepts a verified edit in the retained Fast B/Standard B experiment archive.
+
 - Added default-disabled Fast Mode nested `Palette([...])` RGB-list entry
   reduction through `--max-nested-list-entry-probes`. The stage preserves the
   direct module-level assignment and outer `Palette` call, identifies static

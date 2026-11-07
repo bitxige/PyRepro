@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_if/input/benchmarks/adapter.py", line 16, in <module>
+    main()
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_if/input/benchmarks/adapter.py", line 12, in main
+    test_if_failure()
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_if/input/benchmarks/regression_test.py", line 8, in test_if_failure
+    trigger()
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_if/input/app.py", line 12, in trigger
+    raise ValueError("if fixture failure")
+ValueError: if fixture failure

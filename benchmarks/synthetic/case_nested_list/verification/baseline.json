@@ -1,0 +1,13 @@
+{
+  "runs": 3,
+  "same_failure_runs": 3,
+  "stable": true,
+  "failure_signature": {
+    "exception_type": "ValueError",
+    "message": "nested palette fixture failure",
+    "source_file": "app.py",
+    "function": "require_target_color"
+  },
+  "input_digest": "b9c95c9288b57cda2ca8b6973e320029b47d2da5cae5e83b0915a81dc87b96eb",
+  "source_unchanged": true
+}

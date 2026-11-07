@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_container/input/benchmarks/adapter.py", line 16, in <module>
+    main()
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_container/input/benchmarks/adapter.py", line 12, in main
+    test_container_failure()
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_container/input/benchmarks/regression_test.py", line 8, in test_container_failure
+    trigger()
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_container/input/app.py", line 23, in trigger
+    raise ValueError("container fixture failure")
+ValueError: container fixture failure

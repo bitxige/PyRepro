@@ -1,0 +1,14 @@
+{
+  "case_id": "case_if",
+  "provenance": "fixture",
+  "expected_reducer": "if_statement",
+  "input_root": "input",
+  "adapter_path": "input/benchmarks/adapter.py",
+  "oracle_command": ["python", "benchmarks/adapter.py"],
+  "failure_signature": {"exception_type": "ValueError", "message": "if fixture failure", "source_file": "app.py", "function": "trigger"},
+  "python_version": "3.10.18",
+  "dependencies": "Python standard library only",
+  "input_digest": "017bcf6864f56a9202d27a33a963025a4eedd0f4d655d81bb12027068c50cda8",
+  "baseline_verification": "strict same failure, 3/3",
+  "source_unchanged": true
+}

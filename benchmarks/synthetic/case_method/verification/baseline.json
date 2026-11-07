@@ -1,0 +1,13 @@
+{
+  "runs": 3,
+  "same_failure_runs": 3,
+  "stable": true,
+  "failure_signature": {
+    "exception_type": "ValueError",
+    "message": "method fixture failure",
+    "source_file": "app.py",
+    "function": "trigger"
+  },
+  "input_digest": "d4e98cf5a3b4da776cf0955f6a7f94b0f9d3b29310bcfd6dfee1836e47aec0ef",
+  "source_unchanged": true
+}

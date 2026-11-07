@@ -1,0 +1,13 @@
+{
+  "runs": 3,
+  "same_failure_runs": 3,
+  "stable": true,
+  "failure_signature": {
+    "exception_type": "ValueError",
+    "message": "main guard fixture failure",
+    "source_file": "app.py",
+    "function": "trigger"
+  },
+  "input_digest": "6b1949274f05938b2eadc38d33fda2d1e5657da34234b8772eeb96bf16950695",
+  "source_unchanged": true
+}
