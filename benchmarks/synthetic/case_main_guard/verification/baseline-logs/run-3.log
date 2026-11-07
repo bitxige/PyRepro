@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_main_guard/input/benchmarks/adapter.py", line 16, in <module>
+    main()
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_main_guard/input/benchmarks/adapter.py", line 12, in main
+    test_main_guard_failure()
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_main_guard/input/benchmarks/regression_test.py", line 8, in test_main_guard_failure
+    trigger()
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_main_guard/input/app.py", line 11, in trigger
+    raise ValueError("main guard fixture failure")
+ValueError: main guard fixture failure

@@ -1,0 +1,2 @@
+Python standard library only. Record the exact interpreter version during the
+three-run baseline verification.

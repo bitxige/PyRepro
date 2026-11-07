@@ -1,0 +1,14 @@
+{
+  "case_id": "case_container",
+  "provenance": "fixture",
+  "expected_reducer": ["container_entry", "list_entry"],
+  "input_root": "input",
+  "adapter_path": "input/benchmarks/adapter.py",
+  "oracle_command": ["python", "benchmarks/adapter.py"],
+  "failure_signature": {"exception_type": "ValueError", "message": "container fixture failure", "source_file": "app.py", "function": "trigger"},
+  "python_version": "3.10.18",
+  "dependencies": "Python standard library only",
+  "input_digest": "bcdd837a7d421c4b0bf4f188dc1cdf3a1482ad8e773013cbbe442612692b653e",
+  "baseline_verification": "strict same failure, 3/3",
+  "source_unchanged": true
+}

@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_method/input/benchmarks/adapter.py", line 16, in <module>
+    main()
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_method/input/benchmarks/adapter.py", line 12, in main
+    test_method_failure()
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_method/input/benchmarks/regression_test.py", line 8, in test_method_failure
+    Scenario().trigger()
+  File "/home/xige/my_project/PyRepro-synthetic-benchmarks-b/benchmarks/synthetic/case_method/input/app.py", line 21, in trigger
+    raise ValueError("method fixture failure")
+ValueError: method fixture failure

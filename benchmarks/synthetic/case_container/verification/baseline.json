@@ -1,0 +1,13 @@
+{
+  "runs": 3,
+  "same_failure_runs": 3,
+  "stable": true,
+  "failure_signature": {
+    "exception_type": "ValueError",
+    "message": "container fixture failure",
+    "source_file": "app.py",
+    "function": "trigger"
+  },
+  "input_digest": "bcdd837a7d421c4b0bf4f188dc1cdf3a1482ad8e773013cbbe442612692b653e",
+  "source_unchanged": true
+}
