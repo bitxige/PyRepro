@@ -3,10 +3,32 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import tempfile
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
+
+_DIGEST_IGNORED_DIRECTORY_NAMES = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".mypy_cache",
+        ".nox",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".svn",
+        ".tox",
+        ".venv",
+        "__pycache__",
+        "build",
+        "dist",
+        "env",
+        "node_modules",
+        "venv",
+    }
+)
 
 
 @dataclass
@@ -38,11 +60,15 @@ class ReductionWorkspace:
     def __enter__(self) -> ReductionWorkspace:
         """Copy the protected source into a temporary working directory.
 
+        Symbolic links are materialized in the disposable copy so the
+        reproduction command can run on platforms where creating links is
+        unavailable.
+
         Returns:
             Active disposable workspace.
         """
         self._temporary_directory = tempfile.TemporaryDirectory(
-            prefix="pyrepro-reducer-"
+            prefix="pyrepro-reducer-", ignore_cleanup_errors=True
         )
         self._working_root = Path(self._temporary_directory.name) / "project"
         shutil.copytree(self.source_root, self._working_root)
@@ -99,27 +125,59 @@ class ReductionWorkspace:
         return output
 
 
-def tree_digest(root: Path) -> str:
-    """Return a deterministic digest of the current tree structure and contents.
+def tree_digest(
+    root: Path,
+    *,
+    ignored_directory_names: Collection[str] = _DIGEST_IGNORED_DIRECTORY_NAMES,
+) -> str:
+    """Return a deterministic digest of source files and links.
+
+    Version-control metadata, caches, build outputs, and local environments are
+    excluded because they are not reproducible source inputs and can change
+    independently of the project. Data and model directories remain covered.
 
     Args:
         root: Existing directory to hash.
+        ignored_directory_names: Directory names excluded from traversal.
 
     Returns:
-        SHA-256 digest of relative paths, entry kinds, and file contents.
+        SHA-256 digest of relative paths, entry kinds, link targets, and file
+        contents.
     """
     hasher = hashlib.sha256()
-    paths = sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix())
-    for path in paths:
-        relative = path.relative_to(root).as_posix().encode()
-        if path.is_symlink():
-            hasher.update(b"symlink\0" + relative + b"\0")
-            hasher.update(path.readlink().as_posix().encode())
-        elif path.is_dir():
-            hasher.update(b"directory\0" + relative + b"\0")
-        elif path.is_file():
-            hasher.update(b"file\0" + relative + b"\0")
-            with path.open("rb") as source:
-                for chunk in iter(lambda: source.read(8192), b""):
-                    hasher.update(chunk)
+    ignored = frozenset(ignored_directory_names)
+    for current, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        relative_directory = current_path.relative_to(root)
+        if relative_directory.parts:
+            hasher.update(
+                b"directory\0" + relative_directory.as_posix().encode() + b"\0"
+            )
+        kept_directories: list[str] = []
+        for name in sorted(dirnames):
+            if name in ignored:
+                continue
+            path = current_path / name
+            if path.is_symlink():
+                _hash_symlink(hasher, path, root)
+            else:
+                kept_directories.append(name)
+        dirnames[:] = kept_directories
+        for name in sorted(filenames):
+            path = current_path / name
+            if path.is_symlink():
+                _hash_symlink(hasher, path, root)
+            elif path.is_file():
+                relative = path.relative_to(root).as_posix().encode()
+                hasher.update(b"file\0" + relative + b"\0")
+                with path.open("rb") as source:
+                    for chunk in iter(lambda: source.read(8192), b""):
+                        hasher.update(chunk)
     return hasher.hexdigest()
+
+
+def _hash_symlink(hasher, path: Path, root: Path) -> None:
+    """Hash one symbolic link entry by relative path and target."""
+    relative = path.relative_to(root).as_posix().encode()
+    hasher.update(b"symlink\0" + relative + b"\0")
+    hasher.update(path.readlink().as_posix().encode())

@@ -191,7 +191,9 @@ callbacks.
 
 `ReductionWorkspace` creates a temporary copy of the source project. It
 records a source-tree digest and copies the accepted result only after final
-verification.
+verification. The digest excludes version-control metadata, caches, build
+outputs, and local environments; data and model directories remain covered so
+a change to reproduction inputs is still detected.
 
 ### `reproducer.reducer`
 
