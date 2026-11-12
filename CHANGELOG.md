@@ -2,6 +2,11 @@
 
 ### Fixed
 
+- Fixed-point pipelines no longer abort with a runtime error when an earlier
+  sweep removes the pytest-node test file itself, as happens with external
+  custom-Oracle adapters whose command does not depend on the test file.
+  Import pruning now treats a missing target file as zero candidates.
+
 - Corrected command-output decoding so UTF-8 child output no longer aborts a
   reduction on a non-UTF-8 locale such as Chinese Windows.
 

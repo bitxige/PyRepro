@@ -102,6 +102,36 @@ def test_budget_stop_during_an_import_probe_restores_unaccepted_edits(tmp_path: 
         )
 
 
+def test_missing_pytest_node_file_after_prior_sweep_is_a_graceful_no_op(
+    tmp_path: Path,
+):
+    """A sweep that removed the node file must not crash a later pruning pass."""
+    _write(tmp_path, "pkg/__init__.py", "")
+    _write(tmp_path, "pkg/items.py", "class Needed:\n    pass\n")
+    _write(
+        tmp_path,
+        "tests/test_target.py",
+        "from pkg.items import Needed\n\n"
+        "def test_failure():\n"
+        "    assert Needed is not None\n",
+    )
+    _write(tmp_path, "run_failure.py", "raise ValueError('target failure')\n")
+    (tmp_path / "tests/test_target.py").unlink()
+    runner = CommandRunner([sys.executable, "run_failure.py"], timeout_seconds=2)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = BatchImportPruner(
+            runner, "tests/test_target.py::test_failure", max_probes=4
+        ).prune(workspace)
+
+        assert result.candidates_discovered == 0
+        assert result.editable_operations == 0
+        assert result.candidate_attempts == 0
+        assert result.accepted_probes == 0
+        assert result.executions == 4  # 3 baseline runs + 1 final verification
+        assert result.source_unchanged
+
+
 def test_cli_writes_verified_pruned_project_and_import_probe_jsonl(
     tmp_path: Path, capsys
 ):

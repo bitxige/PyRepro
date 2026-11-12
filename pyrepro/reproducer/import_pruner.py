@@ -166,8 +166,8 @@ class BatchImportPruner:
             baseline = coerce_oracle_baseline(baseline_signature, self.match_mode)
             executions = 0
             baseline_runs = 0
-        analysis = ImportAnalyzer(workspace.root).analyze_pytest_node(self.pytest_node)
-        operations, skipped = _build_operations(workspace.root, analysis.candidates)
+        candidates = _target_import_candidates(workspace.root, self.pytest_node)
+        operations, skipped = _build_operations(workspace.root, candidates)
         legacy_operations, extended_operations = _partition_operations(
             workspace.root, operations
         )
@@ -223,7 +223,7 @@ class BatchImportPruner:
         return ImportPruningResult(
             baseline_signature=baseline,
             baseline_runs=baseline_runs,
-            candidates_discovered=len(analysis.candidates),
+            candidates_discovered=len(candidates),
             editable_operations=len(operations),
             skipped_candidates=skipped,
             candidate_attempts=len(records),
@@ -379,6 +379,29 @@ class BatchImportPruner:
         finally:
             if not accepted:
                 _restore(root, originals)
+
+
+def _target_import_candidates(
+    workspace_root: Path, pytest_node: str
+) -> tuple[ImportCandidate, ...]:
+    """Return static target-import candidates, or none when the test file is gone.
+
+    A later fixed-point sweep may remove the pytest-node file itself when the
+    reproduction command does not depend on it, as with an external
+    custom-Oracle adapter. The node only scopes static analysis, so a missing
+    target file means there is nothing left to prune. Malformed node paths
+    still surface their normal validation error.
+    """
+    path_part = pytest_node.split("::", maxsplit=1)[0]
+    relative_path = Path(path_part)
+    if (
+        path_part
+        and not relative_path.is_absolute()
+        and ".." not in relative_path.parts
+        and not (workspace_root / relative_path).is_file()
+    ):
+        return ()
+    return ImportAnalyzer(workspace_root).analyze_pytest_node(pytest_node).candidates
 
 
 def _build_operations(
