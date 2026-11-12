@@ -17,6 +17,11 @@ experiments remain available through Git history.
 
 ### Changed
 
+- Target-aware Standard and Fast Mode now reject non-Linux platforms before any
+  baseline or search command starts, with a message pointing to Linux/WSL or
+  legacy Standard Mode. Previously the run consumed its baseline and search
+  budget before the publisher failed on the unsupported platform.
+
 - Bounded command execution in the runner. Each command now receives an empty
   standard input, a timed-out command has its descendant processes terminated,
   and each captured output stream retains only its final 4 MiB (including a

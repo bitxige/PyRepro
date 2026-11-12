@@ -1,7 +1,17 @@
 """Tests for repository file inventory and metadata detection."""
 
+from pathlib import Path
+
 import pytest
 from pyrepro.scanner.repository_scanner import RepositoryScanner
+
+
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    """Create a symlink or skip when the platform cannot create one."""
+    try:
+        link.symlink_to(target)
+    except OSError as error:
+        pytest.skip(f"symlink creation is unavailable: {error}")
 
 
 def test_scanner_builds_profile(fixture_repo):
@@ -31,10 +41,10 @@ def test_scanner_handles_internal_and_external_symlinks(fixture_repo):
     """Include internal symlinks and exclude symlinks leaving the root."""
     inside = fixture_repo / "inside.py"
     inside.write_text("value = 1\n", encoding="utf-8")
-    (fixture_repo / "inside-link.py").symlink_to(inside)
+    _symlink_or_skip(fixture_repo / "inside-link.py", inside)
     outside = fixture_repo.parent / "outside.py"
     outside.write_text("value = 2\n", encoding="utf-8")
-    (fixture_repo / "outside-link.py").symlink_to(outside)
+    _symlink_or_skip(fixture_repo / "outside-link.py", outside)
 
     files = RepositoryScanner(fixture_repo).list_files()
 

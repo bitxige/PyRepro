@@ -6,6 +6,14 @@ import pytest
 from pyrepro.path_utils import resolve_repository_file
 
 
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    """Create a symlink or skip when the platform cannot create one."""
+    try:
+        link.symlink_to(target)
+    except OSError as error:
+        pytest.skip(f"symlink creation is unavailable: {error}")
+
+
 def test_resolve_repository_file_allows_internal_file_and_symlink(tmp_path: Path):
     """Allow files and symlinks whose resolved targets stay inside the root."""
     root = tmp_path / "repo"
@@ -13,7 +21,7 @@ def test_resolve_repository_file_allows_internal_file_and_symlink(tmp_path: Path
     source = root / "source.txt"
     source.write_text("content", encoding="utf-8")
     link = root / "link.txt"
-    link.symlink_to(source)
+    _symlink_or_skip(link, source)
 
     resolved, relative = resolve_repository_file(root, "link.txt")
 
@@ -38,7 +46,7 @@ def test_resolve_repository_file_rejects_external_symlink(tmp_path: Path):
     root.mkdir()
     secret = tmp_path / "secret.txt"
     secret.write_text("secret", encoding="utf-8")
-    (root / "secret-link.txt").symlink_to(secret)
+    _symlink_or_skip(root / "secret-link.txt", secret)
 
     with pytest.raises(ValueError, match="escapes"):
         resolve_repository_file(root, "secret-link.txt")

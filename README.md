@@ -205,9 +205,11 @@ Fast Mode prints one of these user-visible outcomes:
   verification cannot complete, fails to match, the source changes, or a
   runtime/publication error occurs.
 
-On Linux, publication uses an atomic no-clobber operation. The requested
-output path must be new and outside the source project. Fast Mode fails safely
-on platforms or filesystems that cannot provide that publication guarantee.
+Fast Mode and target-aware Standard Mode publish with an atomic no-clobber
+operation on Linux. The requested output path must be new and outside the
+source project. On other platforms, PyRepro rejects these modes before
+executing any reproduction command; use Standard Mode without `--pytest-node`,
+or run in Linux/WSL.
 
 ## Standard Mode
 
