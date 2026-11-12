@@ -272,6 +272,8 @@ class GreedyIfStatementReducer:
                         f"requires_pass={candidate.requires_pass}",
                     ),
                     candidate_rolled_back=not removed,
+                    oracle_baseline=baseline,
+                    oracle_evaluation=evaluation,
                 ),
             )
 

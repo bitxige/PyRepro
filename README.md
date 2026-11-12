@@ -20,8 +20,9 @@ Its guiding principle is:
 ## Current status
 
 PyRepro supports a developer-selected **trusted local** Python project and an
-argv reproduction command. It establishes a stable Python failure signature,
-works in a disposable copy, and verifies the same failure in the final output.
+argv reproduction command. It establishes a stable user-selected failure
+condition, works in a disposable copy, and verifies that condition in the
+final output.
 It provides greedy and grouped file strategies, optional top-level symbol
 reduction, and an opt-in Fast Mode that composes import pruning, bounded coarse
 file reduction, greedy cleanup, optional complete-symbol, direct-method, and
@@ -53,6 +54,36 @@ identity: exception type, normalized message, and final traceback frame. The
 `message` mode is reserved for controlled reducer comparisons; it intentionally
 does not change the default product behavior.
 
+### Configured failure oracles
+
+The default `--oracle exception` preserves the established Python exception
+signature behavior. V1.1 also supports a user-selected exit code or a bounded
+stdout/stderr marker without requiring a Python exception:
+
+```bash
+# Preserve an application-defined exit status.
+pyrepro reduce ~/my_project \
+  --oracle exit-code --expected-exit-code 42 \
+  -- python reproduce.py
+
+# Preserve a literal diagnostic on stderr.
+pyrepro reduce ~/my_project \
+  --oracle output --output-stream stderr \
+  --output-match literal --output-pattern "VALIDATION_FAILED" \
+  -- python reproduce.py
+
+# Preserve a variable diagnostic using a regular expression.
+pyrepro reduce ~/my_project \
+  --oracle output --output-stream both \
+  --output-match regex --output-pattern 'ERROR\\[PAYLOAD-\\d+\\]' \
+  -- python reproduce.py
+```
+
+Configured output matching never stores complete command output in reports.
+If a selected stream is truncated and the marker is absent, or if the command
+times out, the result is `inconclusive` and the candidate is rejected.
+`--expect` and `--failure-match` apply only to `--oracle exception`.
+
 By default, the verified output is written outside the source project at:
 
 ```text
@@ -79,7 +110,8 @@ Standard Mode to the shared production pipeline described below.
 `--probe-records <path>` optionally writes one JSONL object for each
 execution-verified candidate probe. Each record includes the phase, proposed
 candidate paths and optional binding-level details, oracle outcome, acceptance
-decision, command duration, cumulative command time, proposed candidate Python
+decision, configured Oracle type, bounded decision reason/evidence, command
+duration, cumulative command time, proposed candidate Python
 LOC, return code, parsed exception details, failure signature, and whether a
 rejected source-edit candidate was rolled back. The path
 must be new and outside the source project. This observability output does not
@@ -88,7 +120,8 @@ alter reduction decisions.
 `--json-report <path>` and `--html-report <path>` optionally write final
 result reports. They are separate from probe telemetry: each report summarizes
 the completed reduction's size, Oracle cost, stage metrics, source integrity,
-publication status, and final verification. Both paths must be new and outside
+publication status, final verification, and configured Oracle type/configuration
+and decision counts. Both paths must be new and outside
 the source project. The HTML report is rendered from the same data as the JSON
 report. In Fast Mode, an unpublished terminal state remains explicitly marked
 as unverified and unpublished.

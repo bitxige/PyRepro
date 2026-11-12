@@ -343,6 +343,8 @@ class GreedySymbolReducer:
                         f"{candidate.start_line}-{candidate.end_line}:{candidate.kind}",
                     ),
                     candidate_rolled_back=not removed,
+                    oracle_baseline=baseline,
+                    oracle_evaluation=evaluation,
                 ),
             )
 

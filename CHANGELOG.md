@@ -15,6 +15,14 @@
 
 ### Changed
 
+- Expanded the V1.1 failure-oracle contract into user-configurable product
+  behavior. `reduce` and `prune-imports` now support exact exit-code matching
+  and literal or regular-expression markers in stdout, stderr, or either
+  stream. Timeouts and absent markers in truncated selected output remain
+  inconclusive and cannot accept an edit. JSON/HTML reports and JSONL probe
+  telemetry now identify the Oracle configuration and bounded decision evidence;
+  the report schema is version 3.
+
 - Introduced the internal V1.1 failure-oracle contract. Production reduction
   and staging publication now establish and evaluate a shared three-state
   Oracle baseline (`match`, `no_match`, or `inconclusive`) while retaining

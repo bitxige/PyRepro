@@ -160,6 +160,8 @@ class CoarseFileReducer:
                 _python_line_count(
                     _python_files(probe_root, DEFAULT_IGNORED_DIRECTORY_NAMES)
                 ),
+                oracle_baseline=oracle_baseline,
+                oracle_evaluation=evaluation,
             )
         return record, record.accepted
 

@@ -177,10 +177,15 @@ the run rather than treating a flaky or unintended failure as reducible.
 The V1.1 oracle boundary separates execution from acceptance: an Oracle first
 establishes a stable baseline and then returns `match`, `no_match`, or
 `inconclusive` for every candidate. Only `match` permits a reducer to retain
-an edit; timeouts and incomplete evidence remain non-accepting. The current
+an edit; timeouts and incomplete evidence remain non-accepting.
 `PythonExceptionOracle` preserves the existing strict and message-only
-exception behavior. Future configured Oracle types must use the same boundary
-rather than bypassing reducer rollback or final staging verification.
+exception behavior. `ExitCodeOracle` preserves a configured process exit code.
+`OutputTextOracle` preserves a literal or regular-expression marker in stdout,
+stderr, or either stream. An absent marker in a truncated selected stream, and
+every command timeout, are `inconclusive`; neither can accept an edit. All
+configured Oracle types use the same baseline, rollback, staging verification,
+and publication boundary. V1.1 does not execute user-supplied Python Oracle
+callbacks.
 
 ### `reproducer.workspace`
 

@@ -108,6 +108,14 @@ def _record_as_json(
         "candidate_rolled_back": record.candidate_rolled_back,
         "outcome": record.outcome.value,
         "accepted": record.accepted,
+        "oracle": {
+            "type": record.oracle_name,
+            "decision": (
+                None if record.oracle_decision is None else record.oracle_decision.value
+            ),
+            "reason": record.oracle_reason,
+            "evidence": dict(record.oracle_evidence),
+        },
         "duration_seconds": record.duration_seconds,
         "elapsed_seconds": elapsed_seconds,
         "remaining_python_loc": record.candidate_python_lines,

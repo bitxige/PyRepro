@@ -26,11 +26,12 @@ from pyrepro.reproducer.preprocessing import (
 from pyrepro.reproducer.publisher import PublishingResult
 from pyrepro.reproducer.reducer import (
     DEFAULT_IGNORED_DIRECTORY_NAMES,
+    ProbeRecord,
     ReductionResult,
 )
 from pyrepro.reproducer.symbol_reducer import SymbolReductionResult
 
-REPORT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 3
 
 
 def validate_report_paths(
@@ -110,6 +111,12 @@ def build_fast_report(
             ),
         ),
         "oracle": {
+            **_oracle_metadata(
+                reduction.baseline_signature,
+                reduction.probe_records,
+                attempts,
+                baseline_executions=reduction.baseline_executions,
+            ),
             "total_executions": budget.executions_started,
             "baseline_executions": reduction.baseline_executions,
             "search_executions": reduction.search_executions,
@@ -146,6 +153,7 @@ def build_fast_report(
                     "return_code": attempt.return_code,
                     "timed_out": attempt.timed_out,
                     "failure_signature": _signature_data(attempt.signature),
+                    "oracle": _attempt_oracle_data(attempt),
                 }
                 for attempt in attempts
             ],
@@ -195,6 +203,13 @@ def build_standard_report(
             _project_size(output_root),
         ),
         "oracle": {
+            **_oracle_metadata(
+                file_result.baseline_signature,
+                file_result.probe_records,
+                (),
+                baseline_executions=file_result.baseline_runs,
+                final_match_runs=1,
+            ),
             "total_executions": reduction_executions + 1,
             "baseline_executions": file_result.baseline_runs,
             "search_executions": reduction_executions - file_result.baseline_runs,
@@ -258,6 +273,12 @@ def build_standard_pipeline_report(
             _project_size(publication.output_path),
         ),
         "oracle": {
+            **_oracle_metadata(
+                reduction.baseline_signature,
+                reduction.probe_records,
+                attempts,
+                baseline_executions=reduction.baseline_executions,
+            ),
             "total_executions": reduction.executions + len(attempts),
             "baseline_executions": reduction.baseline_executions,
             "search_executions": reduction.search_executions,
@@ -297,6 +318,7 @@ def build_standard_pipeline_report(
                     "return_code": attempt.return_code,
                     "timed_out": attempt.timed_out,
                     "failure_signature": _signature_data(attempt.signature),
+                    "oracle": _attempt_oracle_data(attempt),
                 }
                 for attempt in attempts
             ],
@@ -310,6 +332,46 @@ def build_standard_pipeline_report(
             "error_message": publication.error_message,
             "search_budget_exhausted": reduction.budget_exhausted,
         },
+    }
+
+
+def _oracle_metadata(
+    baseline: object,
+    records: Sequence[ProbeRecord],
+    attempts: Sequence[object],
+    *,
+    baseline_executions: int,
+    final_match_runs: int = 0,
+) -> dict[str, object]:
+    """Return bounded configured-Oracle facts and decision counts for a report."""
+    baseline_evidence = getattr(baseline, "evidence", {})
+    decisions = {
+        "match": baseline_executions + final_match_runs,
+        "no_match": 0,
+        "inconclusive": 0,
+    }
+    for record in records:
+        if record.oracle_decision is not None:
+            decisions[record.oracle_decision.value] += 1
+    for attempt in attempts:
+        decision = getattr(attempt, "oracle_decision", None)
+        if decision is not None:
+            decisions[decision.value] += 1
+    return {
+        "type": getattr(baseline, "name", None),
+        "config": dict(baseline_evidence.get("config", {})),
+        "decisions": decisions,
+    }
+
+
+def _attempt_oracle_data(attempt: object) -> dict[str, object]:
+    """Serialize bounded final-verification Oracle evidence."""
+    decision = getattr(attempt, "oracle_decision", None)
+    return {
+        "type": getattr(attempt, "oracle_name", None),
+        "decision": None if decision is None else decision.value,
+        "reason": getattr(attempt, "oracle_reason", None),
+        "evidence": getattr(attempt, "oracle_evidence", None),
     }
 
 
@@ -349,6 +411,8 @@ def render_html(report: Mapping[str, object]) -> str:
     timing = _mapping(report.get("timing"))
     verification = _mapping(report.get("final_verification"))
     budget = _mapping(oracle.get("budget"))
+    oracle_config = json.dumps(dict(_mapping(oracle.get("config"))), sort_keys=True)
+    oracle_decisions = _mapping(oracle.get("decisions"))
     stages = _mappings(report.get("stages"))
     input_size = _mapping(size.get("input"))
     candidate_size = _mapping(size.get("candidate"))
@@ -455,6 +519,19 @@ def render_html(report: Mapping[str, object]) -> str:
                 "Publication",
                 _html_value(status.get("published")),
                 "official output is created only after verification",
+            ),
+            _status_card(
+                "Failure Oracle",
+                _html_value(oracle.get("type")),
+                oracle_config,
+            ),
+            _status_card(
+                "Oracle decisions",
+                _html_value(oracle_decisions.get("match")),
+                "matches; no matches: "
+                f"{_html_value(oracle_decisions.get('no_match'))}; "
+                "inconclusive: "
+                f"{_html_value(oracle_decisions.get('inconclusive'))}",
             ),
             "    </section>",
             '    <section class="panel" aria-labelledby="stages-heading">',

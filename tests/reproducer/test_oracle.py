@@ -7,8 +7,10 @@ from pathlib import Path
 import pytest
 from pyrepro.reproducer.failure import FailureMatchMode
 from pyrepro.reproducer.oracle import (
+    ExitCodeOracle,
     OracleBaselineError,
     OracleDecision,
+    OutputTextOracle,
     PythonExceptionOracle,
 )
 from pyrepro.reproducer.runner import ExecutionResult
@@ -72,6 +74,88 @@ def test_exception_oracle_rejects_unstable_baselines(tmp_path: Path):
             ),
             tmp_path,
         )
+
+
+def test_exit_code_oracle_requires_the_configured_code(tmp_path: Path):
+    """A configured exit code is stable without requiring an exception."""
+    target = ExecutionResult(("tool",), 42, "", "", False)
+    oracle = ExitCodeOracle(42)
+    baseline = oracle.establish_baseline((target,) * 3, tmp_path)
+
+    assert baseline.name == "exit_code"
+    assert baseline.evaluate(target, tmp_path).decision is OracleDecision.MATCH
+    assert (
+        baseline.evaluate(
+            ExecutionResult(("tool",), 1, "", "", False), tmp_path
+        ).decision
+        is OracleDecision.NO_MATCH
+    )
+    assert (
+        baseline.evaluate(
+            ExecutionResult(("tool",), None, "", "", True), tmp_path
+        ).decision
+        is OracleDecision.INCONCLUSIVE
+    )
+
+
+def test_output_text_oracle_matches_selected_streams_and_regex(tmp_path: Path):
+    """Output matching supports literal, regex, and both-stream selection."""
+    literal_result = ExecutionResult(
+        ("tool",), 0, "", "VALIDATION_FAILED: checksum mismatch\n", False
+    )
+    literal = OutputTextOracle("stderr", "literal", "VALIDATION_FAILED")
+    literal_baseline = literal.establish_baseline((literal_result,) * 3, tmp_path)
+    assert (
+        literal_baseline.evaluate(literal_result, tmp_path).decision
+        is OracleDecision.MATCH
+    )
+    assert (
+        literal_baseline.evaluate(
+            ExecutionResult(("tool",), 0, "VALIDATION_FAILED", "", False), tmp_path
+        ).decision
+        is OracleDecision.NO_MATCH
+    )
+
+    regex_result = ExecutionResult(
+        ("tool",), 0, "ERROR[PAYLOAD-1007]: invalid record", "", False
+    )
+    regex = OutputTextOracle("both", "regex", r"ERROR\[PAYLOAD-\d+\]")
+    regex_baseline = regex.establish_baseline((regex_result,) * 3, tmp_path)
+    assert (
+        regex_baseline.evaluate(regex_result, tmp_path).decision is OracleDecision.MATCH
+    )
+
+
+def test_output_text_oracle_marks_missing_truncated_output_inconclusive(
+    tmp_path: Path,
+):
+    """A missing marker cannot reject a candidate when selected output is partial."""
+    matching = ExecutionResult(("tool",), 0, "target marker", "", False)
+    oracle = OutputTextOracle("stdout", "literal", "target marker")
+    baseline = oracle.establish_baseline((matching,) * 3, tmp_path)
+    truncated = ExecutionResult(("tool",), 0, "other tail", "", False, True)
+
+    assert (
+        baseline.evaluate(truncated, tmp_path).decision is OracleDecision.INCONCLUSIVE
+    )
+    assert (
+        baseline.evaluate(
+            ExecutionResult(("tool",), 0, "other output", "", False), tmp_path
+        ).decision
+        is OracleDecision.NO_MATCH
+    )
+    assert (
+        baseline.evaluate(
+            ExecutionResult(("tool",), None, "target marker", "", True), tmp_path
+        ).decision
+        is OracleDecision.INCONCLUSIVE
+    )
+
+
+def test_output_text_oracle_rejects_invalid_regular_expression():
+    """Invalid regular expressions fail before any command can run."""
+    with pytest.raises(ValueError, match="invalid output regular expression"):
+        OutputTextOracle("stdout", "regex", "[")
 
 
 def _key_error(root: Path, file_name: str, function: str) -> ExecutionResult:

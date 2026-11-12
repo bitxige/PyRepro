@@ -365,6 +365,11 @@ class BatchImportPruner:
                     exception_message=error_message,
                     failure_signature=FailureSignature.from_result(execution, root),
                     candidate_python_lines=proposed_lines,
+                    candidate_rolled_back=not accepted,
+                    oracle_name=oracle_baseline.name,
+                    oracle_decision=evaluation.decision,
+                    oracle_reason=evaluation.reason,
+                    oracle_evidence=dict(evaluation.evidence),
                 ),
                 accepted,
             )

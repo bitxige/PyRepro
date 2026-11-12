@@ -64,6 +64,10 @@ class FinalVerificationAttempt:
     signature: FailureSignature | None
     return_code: int | None
     timed_out: bool
+    oracle_name: str | None = None
+    oracle_decision: OracleDecision | None = None
+    oracle_reason: str | None = None
+    oracle_evidence: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -194,6 +198,10 @@ def verify_and_publish(
                     signature=FailureSignature.from_result(execution, staging),
                     return_code=execution.return_code,
                     timed_out=execution.timed_out,
+                    oracle_name=baseline.name,
+                    oracle_decision=evaluation.decision,
+                    oracle_reason=evaluation.reason,
+                    oracle_evidence=dict(evaluation.evidence),
                 )
             )
             if evaluation.decision is not OracleDecision.MATCH:
