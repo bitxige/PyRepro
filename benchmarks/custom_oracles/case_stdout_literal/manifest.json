@@ -1,0 +1,18 @@
+{
+  "case_id": "case_stdout_literal",
+  "provenance": "fixture",
+  "input_root": "input",
+  "adapter_path": "input/benchmarks/adapter.py",
+  "oracle_command": ["python", "benchmarks/adapter.py"],
+  "oracle": {
+    "type": "output",
+    "stream": "stdout",
+    "match_mode": "literal",
+    "pattern": "VALIDATION_FAILED"
+  },
+  "python_version": "3.10+",
+  "dependencies": "Python standard library only",
+  "input_digest": "e4f57076468815507d890f932b1df14562bd5230cbe03aeae895ec31240e9175",
+  "baseline_verification": "stdout literal marker, 3/3",
+  "source_unchanged": true
+}

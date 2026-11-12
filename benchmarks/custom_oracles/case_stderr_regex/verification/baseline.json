@@ -1,0 +1,14 @@
+{
+  "runs": 3,
+  "match_runs": 3,
+  "stable": true,
+  "oracle": {
+    "type": "output",
+    "stream": "stderr",
+    "match_mode": "regex",
+    "pattern": "ERROR\\[PAYLOAD-\\d+\\]"
+  },
+  "return_codes": [0, 0, 0],
+  "input_digest": "7e1c52b5e4c4fb3a693dbb4cb3460f8f09b61d9aa97bd039338149e6ff33aa6a",
+  "source_unchanged": true
+}

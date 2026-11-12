@@ -1,0 +1,16 @@
+{
+  "case_id": "case_exit_code",
+  "provenance": "fixture",
+  "input_root": "input",
+  "adapter_path": "input/benchmarks/adapter.py",
+  "oracle_command": ["python", "benchmarks/adapter.py"],
+  "oracle": {
+    "type": "exit-code",
+    "expected_exit_code": 42
+  },
+  "python_version": "3.10+",
+  "dependencies": "Python standard library only",
+  "input_digest": "9347ffe461f2e2373c323d4efcdddf0b1c83d8f77b94aef09d0ce1b550c2724c",
+  "baseline_verification": "target exit code 42, 3/3",
+  "source_unchanged": true
+}
