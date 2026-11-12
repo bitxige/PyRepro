@@ -77,6 +77,11 @@
 
 ### Added
 
+- Added three deterministic configured-Oracle benchmark fixtures covering a
+  business exit code, a successful command with a stdout validation marker,
+  and a successful command with a stderr regular-expression marker. Each has
+  a frozen input digest and non-exception 3/3 baseline evidence.
+
 - Added five deterministic, standard-library-only synthetic benchmark fixtures
   for direct-method, complete-if, module-container/list-entry, `__main__`
   guard, and nested `Palette` RGB-list reduction. Each fixture records a

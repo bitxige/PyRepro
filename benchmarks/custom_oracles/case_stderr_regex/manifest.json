@@ -1,0 +1,18 @@
+{
+  "case_id": "case_stderr_regex",
+  "provenance": "fixture",
+  "input_root": "input",
+  "adapter_path": "input/benchmarks/adapter.py",
+  "oracle_command": ["python", "benchmarks/adapter.py"],
+  "oracle": {
+    "type": "output",
+    "stream": "stderr",
+    "match_mode": "regex",
+    "pattern": "ERROR\\[PAYLOAD-\\d+\\]"
+  },
+  "python_version": "3.10+",
+  "dependencies": "Python standard library only",
+  "input_digest": "7e1c52b5e4c4fb3a693dbb4cb3460f8f09b61d9aa97bd039338149e6ff33aa6a",
+  "baseline_verification": "stderr regex marker, 3/3",
+  "source_unchanged": true
+}

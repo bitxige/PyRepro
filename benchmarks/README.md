@@ -3,6 +3,13 @@
 These drivers compare existing PyRepro configurations. They do not modify the
 reducer algorithms or provide product CLI commands.
 
+The deterministic fixture suites live separately:
+
+- [`synthetic/`](synthetic/): reducer-stage controlled cases using Python
+  exception signatures.
+- [`custom_oracles/`](custom_oracles/): configured exit-code and output-marker
+  cases that do not rely on Python exceptions.
+
 ## Three-strategy preprocessing comparison
 
 Run the comparison from the PyRepro repository root with a trusted local

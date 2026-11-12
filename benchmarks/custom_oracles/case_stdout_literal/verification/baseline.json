@@ -1,0 +1,14 @@
+{
+  "runs": 3,
+  "match_runs": 3,
+  "stable": true,
+  "oracle": {
+    "type": "output",
+    "stream": "stdout",
+    "match_mode": "literal",
+    "pattern": "VALIDATION_FAILED"
+  },
+  "return_codes": [0, 0, 0],
+  "input_digest": "e4f57076468815507d890f932b1df14562bd5230cbe03aeae895ec31240e9175",
+  "source_unchanged": true
+}

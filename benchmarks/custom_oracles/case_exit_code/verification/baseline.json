@@ -1,0 +1,12 @@
+{
+  "runs": 3,
+  "match_runs": 3,
+  "stable": true,
+  "oracle": {
+    "type": "exit-code",
+    "expected_exit_code": 42
+  },
+  "return_codes": [42, 42, 42],
+  "input_digest": "9347ffe461f2e2373c323d4efcdddf0b1c83d8f77b94aef09d0ce1b550c2724c",
+  "source_unchanged": true
+}
