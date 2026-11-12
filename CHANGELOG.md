@@ -19,13 +19,19 @@
   captured stream was truncated, making runner limits visible next to Oracle
   decisions and acceptance.
 
+- Final JSON and HTML result reports now include the original argv reproduction
+  command for provenance; the report schema is version 4.
+
+- Command executions now record their wall-clock duration in `ExecutionResult`,
+  alongside exit status, captured output, timeout, and truncation facts.
+
 - Expanded the V1.1 failure-oracle contract into user-configurable product
   behavior. `reduce` and `prune-imports` now support exact exit-code matching
   and literal or regular-expression markers in stdout, stderr, or either
   stream. Timeouts and absent markers in truncated selected output remain
   inconclusive and cannot accept an edit. JSON/HTML reports and JSONL probe
   telemetry now identify the Oracle configuration and bounded decision evidence;
-  the report schema is version 3.
+  the report schema is version 4.
 
 - Introduced the internal V1.1 failure-oracle contract. Production reduction
   and staging publication now establish and evaluate a shared three-state

@@ -431,6 +431,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     file_result,
                     symbol_result,
                     run_wall_clock_seconds=perf_counter() - started_at,
+                    command=command,
                 ),
                 json_report,
                 html_report,
@@ -540,6 +541,7 @@ def _reduce_standard_pipeline(
         reduction,
         publication,
         run_wall_clock_seconds=perf_counter() - started_at,
+        command=command,
     )
     if json_report is not None or html_report is not None:
         try:
@@ -631,6 +633,7 @@ def _reduce_fast(
                     reduction,
                     publication,
                     run_wall_clock_seconds=perf_counter() - started_at,
+                    command=command,
                 )
     except UnstableBaselineError as error:
         _print_fast_failure("baseline_failed", str(error))

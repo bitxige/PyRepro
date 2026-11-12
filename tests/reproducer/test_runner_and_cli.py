@@ -79,6 +79,18 @@ def test_runner_reports_timeout(tmp_path: Path):
     assert result.return_code is None
 
 
+def test_runner_records_execution_duration(tmp_path: Path):
+    """Every execution reports its wall-clock duration."""
+    runner = CommandRunner(
+        (sys.executable, "-c", "import time; time.sleep(0.1)"), timeout_seconds=2
+    )
+
+    result = runner.run(tmp_path)
+
+    assert not result.timed_out
+    assert result.duration_seconds >= 0.08
+
+
 def test_runner_decodes_utf8_output_on_a_non_utf8_locale(tmp_path: Path):
     """UTF-8 child output must not abort reduction on a non-UTF-8 locale."""
     child = tmp_path / "child.py"
@@ -291,6 +303,8 @@ def test_standard_mode_cli_optionally_writes_final_result_reports(
 
     assert status == 0
     assert report["mode"] == "standard"
+    assert report["schema_version"] == 4
+    assert report["command"] == [sys.executable, "reproduce.py"]
     assert report["status"]["verified"]
     assert report["final_verification"] == {
         "attempts": [],
@@ -878,7 +892,8 @@ def test_standard_mode_cli_uses_the_shared_pipeline_and_publisher(
     )
     assert "Final verification: 3/3 passed" in captured.out
     assert report["mode"] == "standard"
-    assert report["schema_version"] == 3
+    assert report["schema_version"] == 4
+    assert report["command"] == [sys.executable, "run_target.py"]
     assert report["oracle"]["type"] == "python_exception"
     assert report["oracle"]["budget"] is None
     assert report["pipeline"]["fixed_point_reached"]
@@ -963,7 +978,8 @@ def test_fast_mode_cli_optionally_writes_final_result_reports(tmp_path: Path, ca
     report = json.loads(json_report.read_text(encoding="utf-8"))
 
     assert status == 0
-    assert report["schema_version"] == 3
+    assert report["schema_version"] == 4
+    assert report["command"] == [sys.executable, "run_target.py"]
     assert report["oracle"]["type"] == "python_exception"
     assert report["mode"] == "fast"
     assert report["pipeline"]["termination_reason"] == "budget_exhausted"
