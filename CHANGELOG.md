@@ -28,6 +28,12 @@
   Oracle baseline (`match`, `no_match`, or `inconclusive`) while retaining
   the existing Python exception CLI behavior and strict/message compatibility.
 
+- Source-integrity digests now exclude version-control metadata, caches, build
+  outputs, and local environments, and prune those directories during traversal.
+  Data and model directories remain covered. This avoids false "source changed"
+  results from `.git` or cache activity and reduces digest cost on real
+  repositories.
+
 - Bounded command execution in the runner. Each command now receives an empty
   standard input, a timed-out command has its descendant processes terminated,
   and each captured output stream retains only its final 4 MiB (including a
