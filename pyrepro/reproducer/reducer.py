@@ -5,8 +5,8 @@ from __future__ import annotations
 import shutil
 import tempfile
 from collections import Counter
-from collections.abc import Collection, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from time import perf_counter
 
@@ -26,6 +26,7 @@ from pyrepro.reproducer.oracle import (
     OracleBaseline,
     OracleBaselineError,
     OracleDecision,
+    OracleEvaluation,
     PythonExceptionOracle,
     coerce_oracle_baseline,
     legacy_outcome,
@@ -131,6 +132,10 @@ class ProbeRecord:
     candidate_python_lines: int | None = None
     candidate_descriptions: tuple[str, ...] = ()
     candidate_rolled_back: bool = False
+    oracle_name: str | None = None
+    oracle_decision: OracleDecision | None = None
+    oracle_reason: str | None = None
+    oracle_evidence: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -374,6 +379,8 @@ class GreedyFileReducer:
                     removed,
                     duration_seconds,
                     workspace_root,
+                    oracle_baseline=baseline,
+                    oracle_evaluation=evaluation,
                 ),
                 1,
             )
@@ -659,6 +666,8 @@ class DdminFileReducer:
                     workspace_root,
                     _python_line_count(retained),
                     candidate_rolled_back=not accepted,
+                    oracle_baseline=baseline,
+                    oracle_evaluation=evaluation,
                 ),
             )
 
@@ -672,12 +681,13 @@ def format_reduction_summary(result: ReductionResult) -> str:
     Returns:
         Multi-line reduction summary.
     """
+    oracle_name = result.baseline_signature.name
     lines = [
         "Baseline",
         "--------",
         result.baseline_signature.describe(),
         f"Stable: {result.baseline_runs}/{result.baseline_runs}",
-        f"Failure match: {result.failure_match_mode.value}",
+        f"Oracle: {oracle_name}",
         "",
         "Reduction",
         "---------",
@@ -702,9 +712,15 @@ def format_reduction_summary(result: ReductionResult) -> str:
             f"Removed candidate files: {result.removed_candidate_files}",
             f"Wall-clock seconds: {result.wall_clock_seconds:.3f}",
             f"Original modified: {'no' if result.source_unchanged else 'yes'}",
-            "Final verification: SAME_FAILURE",
+            (
+                "Final verification: SAME_FAILURE"
+                if oracle_name == "python_exception"
+                else "Final verification: MATCH"
+            ),
         ]
     )
+    if oracle_name == "python_exception":
+        lines.insert(5, f"Failure match: {result.failure_match_mode.value}")
     lines.extend(_format_probe_telemetry_summary(result.probe_records))
     return "\n".join(lines)
 
@@ -849,6 +865,8 @@ def _probe_record(
     candidate_python_lines: int | None = None,
     candidate_descriptions: Sequence[str] = (),
     candidate_rolled_back: bool = False,
+    oracle_baseline: OracleBaseline | None = None,
+    oracle_evaluation: OracleEvaluation | None = None,
 ) -> ProbeRecord:
     """Build telemetry without changing an already-classified oracle outcome."""
     source_root = candidate_root or signature_workspace_root
@@ -876,6 +894,14 @@ def _probe_record(
         candidate_python_lines=candidate_python_lines,
         candidate_descriptions=tuple(candidate_descriptions),
         candidate_rolled_back=candidate_rolled_back,
+        oracle_name=None if oracle_baseline is None else oracle_baseline.name,
+        oracle_decision=(
+            None if oracle_evaluation is None else oracle_evaluation.decision
+        ),
+        oracle_reason=None if oracle_evaluation is None else oracle_evaluation.reason,
+        oracle_evidence=(
+            {} if oracle_evaluation is None else dict(oracle_evaluation.evidence)
+        ),
     )
 
 

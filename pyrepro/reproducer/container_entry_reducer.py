@@ -295,6 +295,8 @@ class GreedyContainerEntryReducer:
                         f"span={candidate.source_span}",
                     ),
                     candidate_rolled_back=not removed,
+                    oracle_baseline=baseline,
+                    oracle_evaluation=evaluation,
                 ),
             )
 

@@ -309,7 +309,10 @@ def test_standard_mode_cli_optionally_writes_final_result_reports(
     )
     assert "JSON report:" in captured.out
     assert "HTML report:" in captured.out
-    assert "PyRepro reduction report" in html_report.read_text(encoding="utf-8")
+    html = html_report.read_text(encoding="utf-8")
+    assert "PyRepro reduction report" in html
+    assert "Failure Oracle" in html
+    assert "python_exception" in html
 
 
 def test_standard_mode_rejects_an_output_copy_with_a_different_failure(
@@ -875,7 +878,8 @@ def test_standard_mode_cli_uses_the_shared_pipeline_and_publisher(
     )
     assert "Final verification: 3/3 passed" in captured.out
     assert report["mode"] == "standard"
-    assert report["schema_version"] == 2
+    assert report["schema_version"] == 3
+    assert report["oracle"]["type"] == "python_exception"
     assert report["oracle"]["budget"] is None
     assert report["pipeline"]["fixed_point_reached"]
     assert report["pipeline"]["termination_reason"] == "fixed_point"
@@ -959,7 +963,8 @@ def test_fast_mode_cli_optionally_writes_final_result_reports(tmp_path: Path, ca
     report = json.loads(json_report.read_text(encoding="utf-8"))
 
     assert status == 0
-    assert report["schema_version"] == 2
+    assert report["schema_version"] == 3
+    assert report["oracle"]["type"] == "python_exception"
     assert report["mode"] == "fast"
     assert report["pipeline"]["termination_reason"] == "budget_exhausted"
     assert report["pipeline"]["sweep_count"] == len(report["sweeps"])
@@ -991,6 +996,160 @@ def test_fast_mode_cli_optionally_writes_final_result_reports(tmp_path: Path, ca
     assert "JSON report:" in captured.out
     assert "HTML report:" in captured.out
     assert "PyRepro reduction report" in html_report.read_text(encoding="utf-8")
+
+
+@linux_only
+def test_fast_mode_cli_uses_output_oracle_for_reduction_and_publication(
+    tmp_path: Path, capsys
+):
+    """Configured output matching drives probes and the final 3/3 publisher."""
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    json_report = tmp_path / "result.json"
+    probe_report = tmp_path / "probes.jsonl"
+    _output_oracle_project(source)
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--mode",
+            "fast",
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--max-oracle-executions",
+            "7",
+            "--max-coarse-probes",
+            "0",
+            "--oracle",
+            "output",
+            "--output-stream",
+            "stderr",
+            "--output-match",
+            "literal",
+            "--output-pattern",
+            "VALIDATION_FAILED",
+            "--json-report",
+            str(json_report),
+            "--probe-records",
+            str(probe_report),
+            "--output",
+            str(output),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    report = json.loads(json_report.read_text(encoding="utf-8"))
+    records = [
+        json.loads(line)
+        for line in probe_report.read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert status == 0
+    assert "Final verification: 3/3 passed" in captured.out
+    assert report["oracle"]["type"] == "output_text"
+    assert report["oracle"]["config"] == {
+        "match_mode": "literal",
+        "pattern": "VALIDATION_FAILED",
+        "stream": "stderr",
+    }
+    assert report["final_verification"]["same_failure_runs"] == 3
+    assert report["oracle"]["decisions"]["match"] >= 6
+    assert all(
+        attempt["oracle"]["type"] == "output_text"
+        and attempt["oracle"]["decision"] == "match"
+        for attempt in report["final_verification"]["attempts"]
+    )
+    assert all(record["oracle"]["type"] == "output_text" for record in records)
+    assert all(record["oracle"]["decision"] is not None for record in records)
+    assert (output / "run_target.py").is_file()
+
+
+def test_cli_rejects_mixed_configured_oracle_options(tmp_path: Path, capsys):
+    """Invalid Oracle combinations fail before a reproduction command runs."""
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "reduce",
+                str(tmp_path),
+                "--oracle",
+                "exit-code",
+                "--expected-exit-code",
+                "42",
+                "--expect",
+                "old exception text",
+                "--",
+                sys.executable,
+                "-c",
+                "raise SystemExit(42)",
+            ]
+        )
+
+    assert error.value.code == 2
+    assert "only valid with --oracle exception" in capsys.readouterr().err
+
+
+def test_cli_rejects_invalid_output_regex_before_execution(tmp_path: Path, capsys):
+    """Invalid configured patterns fail before a baseline command can run."""
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "reduce",
+                str(tmp_path),
+                "--oracle",
+                "output",
+                "--output-match",
+                "regex",
+                "--output-pattern",
+                "[",
+                "--",
+                sys.executable,
+                "-c",
+                "raise SystemExit(99)",
+            ]
+        )
+
+    assert error.value.code == 2
+    assert "invalid output regular expression" in capsys.readouterr().err
+
+
+def test_standard_cli_reduces_with_an_exit_code_oracle(tmp_path: Path, capsys):
+    """Exit-code configuration drives the public Standard reduction path."""
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    report_path = tmp_path / "result.json"
+    _write(source, "target.py", "import sys\nsys.exit(42)\n")
+    _write(source, "unused.py", "value = 'remove me'\n")
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--oracle",
+            "exit-code",
+            "--expected-exit-code",
+            "42",
+            "--output",
+            str(output),
+            "--json-report",
+            str(report_path),
+            "--",
+            sys.executable,
+            "target.py",
+        ]
+    )
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert status == 0
+    assert report["oracle"]["type"] == "exit_code"
+    assert report["oracle"]["config"] == {"expected_exit_code": 42}
+    assert report["oracle"]["decisions"]["match"] >= 4
+    assert not (output / "unused.py").exists()
+    assert (output / "target.py").is_file()
+    assert "Stable: 3/3" in capsys.readouterr().out
 
 
 def test_standard_fast_config_policy_matches_fast_stage_enablement():
@@ -1822,6 +1981,26 @@ def _fast_project(root: Path) -> None:
         "    raise ValueError('target failure')\n\n"
         "def test_unrelated():\n"
         "    assert Unneeded is not None\n",
+    )
+    _write(
+        root,
+        "run_target.py",
+        "from tests.test_target import test_failure\ntest_failure()\n",
+    )
+
+
+def _output_oracle_project(root: Path) -> None:
+    """Create a target-aware project whose target behavior is stderr output."""
+    _write(root, "tests/__init__.py", "")
+    _write(root, "ballast.py", "unused = True\n")
+    _write(
+        root,
+        "tests/test_target.py",
+        "import sys\n"
+        "from ballast import unused\n\n"
+        "def test_failure():\n"
+        "    assert unused\n"
+        "    print('VALIDATION_FAILED: checksum mismatch', file=sys.stderr)\n",
     )
     _write(
         root,

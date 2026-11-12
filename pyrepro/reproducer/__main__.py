@@ -16,7 +16,13 @@ from pyrepro.reproducer.import_pruner import (
     BatchImportPruner,
     format_import_pruning_summary,
 )
-from pyrepro.reproducer.oracle import OracleDecision
+from pyrepro.reproducer.oracle import (
+    ExitCodeOracle,
+    FailureOracle,
+    OracleDecision,
+    OutputTextOracle,
+    PythonExceptionOracle,
+)
 from pyrepro.reproducer.preprocessing import (
     FixedPointPipelineReducer,
     PipelineProbeLimits,
@@ -130,6 +136,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "message is for controlled comparisons"
         ),
     )
+    _configure_oracle_arguments(reduce_parser)
     reduce_parser.add_argument(
         "--strategy",
         choices=("greedy", "ddmin"),
@@ -304,6 +311,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not source.is_dir():
         parser.error(f"source root is not a directory: {source}")
     output = args.output or _default_output_directory(source)
+    try:
+        oracle = _build_oracle(args)
+    except ValueError as error:
+        parser.error(str(error))
     json_report: Path | None = None
     html_report: Path | None = None
     try:
@@ -331,6 +342,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             output,
             probe_report,
             command,
+            oracle,
         )
     if args.mode == "fast":
         _validate_fast_arguments(parser, args)
@@ -349,6 +361,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             json_report,
             html_report,
             command,
+            oracle,
         )
     if args.strategy == "greedy" and args.pytest_node is not None:
         return _reduce_standard_pipeline(
@@ -360,6 +373,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             json_report,
             html_report,
             command,
+            oracle,
         )
     started_at = perf_counter()
     try:
@@ -377,6 +391,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 runner,
                 expected_text=args.expect,
                 match_mode=match_mode,
+                oracle=oracle,
             )
             with ReductionWorkspace(source) as workspace:
                 file_result = reducer.reduce(workspace)
@@ -457,6 +472,7 @@ def _reduce_standard_pipeline(
     json_report: Path | None,
     html_report: Path | None,
     command: Sequence[str],
+    oracle: FailureOracle,
 ) -> int:
     """Run the complete reducer lineup without Fast Mode's shared budget.
 
@@ -488,6 +504,7 @@ def _reduce_standard_pipeline(
                 match_mode=match_mode,
                 limits=_standard_pipeline_limits(args),
                 symbol_order=SymbolOrder(args.symbol_order),
+                oracle=oracle,
             )
             with ReductionWorkspace(source) as workspace:
                 reduction = reducer.reduce(workspace, budget=budget)
@@ -564,6 +581,7 @@ def _reduce_fast(
     json_report: Path | None,
     html_report: Path | None,
     command: Sequence[str],
+    oracle: FailureOracle,
 ) -> int:
     """Run the existing budgeted pipeline and report its publishing state.
 
@@ -594,6 +612,7 @@ def _reduce_fast(
                 match_mode=match_mode,
                 limits=_fast_pipeline_limits(args),
                 symbol_order=SymbolOrder(args.symbol_order),
+                oracle=oracle,
             )
             with ReductionWorkspace(source) as workspace:
                 reduction = reducer.reduce(workspace, budget=budget)
@@ -887,6 +906,72 @@ def _print_fast_failure(state: str, detail: str) -> None:
     print("No official reproducer was published.", file=sys.stderr)
 
 
+def _configure_oracle_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add one backwards-compatible configured-oracle option group."""
+    parser.add_argument(
+        "--oracle",
+        choices=("exception", "exit-code", "output"),
+        default="exception",
+        help="failure oracle: exception, exit-code, or output (default: exception)",
+    )
+    parser.add_argument(
+        "--expected-exit-code",
+        type=int,
+        help="required target exit code when --oracle exit-code is selected",
+    )
+    parser.add_argument(
+        "--output-stream",
+        choices=("stdout", "stderr", "both"),
+        default="stderr",
+        help="stream searched by --oracle output (default: stderr)",
+    )
+    parser.add_argument(
+        "--output-match",
+        choices=("literal", "regex"),
+        default="literal",
+        help="pattern interpretation for --oracle output (default: literal)",
+    )
+    parser.add_argument(
+        "--output-pattern",
+        help="required literal or regular expression when --oracle output is selected",
+    )
+
+
+def _build_oracle(args: argparse.Namespace) -> FailureOracle:
+    """Construct exactly one configured Oracle before any command executes."""
+    oracle_name = args.oracle
+    if oracle_name == "exception":
+        if (
+            args.expected_exit_code is not None
+            or args.output_pattern is not None
+            or args.output_stream != "stderr"
+            or args.output_match != "literal"
+        ):
+            raise ValueError(
+                "configured exit-code and output options require a matching --oracle"
+            )
+        return PythonExceptionOracle(FailureMatchMode(args.failure_match), args.expect)
+    if args.expect is not None or args.failure_match != FailureMatchMode.STRICT.value:
+        raise ValueError(
+            "--expect and --failure-match are only valid with --oracle exception"
+        )
+    if oracle_name == "exit-code":
+        if args.expected_exit_code is None:
+            raise ValueError("--oracle exit-code requires --expected-exit-code")
+        if (
+            args.output_pattern is not None
+            or args.output_stream != "stderr"
+            or args.output_match != "literal"
+        ):
+            raise ValueError("output options require --oracle output")
+        return ExitCodeOracle(args.expected_exit_code)
+    if args.expected_exit_code is not None:
+        raise ValueError("--expected-exit-code requires --oracle exit-code")
+    if args.output_pattern is None:
+        raise ValueError("--oracle output requires --output-pattern")
+    return OutputTextOracle(args.output_stream, args.output_match, args.output_pattern)
+
+
 def _configure_prune_parser(parser: argparse.ArgumentParser) -> None:
     """Add the intentionally narrow PR5.2c import-pruning CLI arguments."""
     parser.add_argument("source", type=Path, help="trusted local project root")
@@ -916,6 +1001,7 @@ def _configure_prune_parser(parser: argparse.ArgumentParser) -> None:
         default=FailureMatchMode.STRICT.value,
         help="failure identity for pruning; strict is the product default",
     )
+    _configure_oracle_arguments(parser)
     parser.add_argument(
         "--max-import-probes",
         type=int,
@@ -936,6 +1022,7 @@ def _prune_imports(
     output: Path,
     probe_report: Path | None,
     command: Sequence[str],
+    oracle: FailureOracle,
 ) -> int:
     """Execute bounded target-aware import pruning in a disposable workspace."""
     print("Warning: PyRepro will repeatedly execute the supplied command.")
@@ -949,6 +1036,7 @@ def _prune_imports(
             expected_text=args.expect,
             match_mode=match_mode,
             max_probes=args.max_import_probes,
+            oracle=oracle,
         )
         with ReductionWorkspace(source) as workspace:
             result = pruner.prune(workspace)

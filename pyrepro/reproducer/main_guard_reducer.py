@@ -243,6 +243,8 @@ class GreedyMainGuardReducer:
                         for candidate in batch
                     ),
                     candidate_rolled_back=not removed,
+                    oracle_baseline=baseline,
+                    oracle_evaluation=evaluation,
                 ),
             )
 
