@@ -23,7 +23,13 @@ from pyrepro.reproducer.publisher import (
 from pyrepro.reproducer.runner import CommandRunner
 from pyrepro.reproducer.workspace import ReductionWorkspace, tree_digest
 
+linux_only = pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="atomic no-clobber publication requires Linux renameat2",
+)
 
+
+@linux_only
 def test_publishes_only_after_three_independent_matching_runs(tmp_path: Path):
     """A completed staging verification atomically creates the output directory."""
     source = _project(tmp_path / "source")
@@ -60,6 +66,7 @@ def test_publishes_only_after_three_independent_matching_runs(tmp_path: Path):
     )
 
 
+@linux_only
 def test_unbounded_policy_uses_the_same_three_run_publisher(tmp_path: Path):
     """Standard Mode has no budget but keeps staging and atomic publication."""
     source = _project(tmp_path / "source")
@@ -170,6 +177,7 @@ def test_missing_final_slot_returns_unverified_without_output(tmp_path: Path):
     assert not list(tmp_path.glob(".output.staging-*"))
 
 
+@linux_only
 def test_verified_output_reports_budget_exhaustion_after_early_stop(tmp_path: Path):
     """A successful final 3/3 can publish the best budget-stopped workspace."""
     source = _project(tmp_path / "source")
@@ -337,6 +345,7 @@ def test_publish_conflict_preserves_concurrently_created_output(
     assert not list(tmp_path.glob(".output.staging-*"))
 
 
+@linux_only
 def test_kernel_no_replace_publish_refuses_an_existing_empty_directory(tmp_path: Path):
     """The Linux publication primitive itself never replaces an empty output."""
     staging = tmp_path / "staging"

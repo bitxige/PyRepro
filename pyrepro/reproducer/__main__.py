@@ -332,6 +332,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             probe_report,
             command,
         )
+    if args.mode == "fast":
+        _validate_fast_arguments(parser, args)
+    target_aware_standard = args.strategy == "greedy" and args.pytest_node is not None
+    if args.mode == "fast" or target_aware_standard:
+        _ensure_linux_publication(parser)
     print("Warning: PyRepro will repeatedly execute the supplied command.", flush=True)
     print("Only run a project and command that you trust.", flush=True)
     if args.mode == "fast":
@@ -737,6 +742,21 @@ def _validate_fast_arguments(
             "--symbol-order requires --max-symbol-probes or "
             "--max-method-probes greater than zero"
         )
+
+
+def _ensure_linux_publication(parser: argparse.ArgumentParser) -> None:
+    """Reject target-aware runs that cannot publish on this platform.
+
+    Atomic no-clobber publication uses ``renameat2(RENAME_NOREPLACE)``. The
+    publisher already fails safely elsewhere, but that happens after baseline
+    and search work, so reject the invocation before any command runs.
+    """
+    if sys.platform.startswith("linux"):
+        return
+    parser.error(
+        "target-aware Standard and Fast Mode publish with Linux renameat2; "
+        "run on Linux or WSL, or use Standard Mode without --pytest-node"
+    )
 
 
 def _print_fast_publication(

@@ -1,26 +1,24 @@
-# PyRepro Change Log
-
-All notable current changes are documented here. Earlier RepoSentinel review
-experiments remain available through Git history.
-
 ## [Unreleased]
 
 ### Fixed
 
 - Corrected command-output decoding so UTF-8 child output no longer aborts a
-  reduction on a non-UTF-8 locale such as Chinese Windows. The runner now tries
-  UTF-8, falls back to the platform locale encoding, and replaces undecodable
-  bytes instead of failing to capture stdout or stderr.
+  reduction on a non-UTF-8 locale such as Chinese Windows.
 
-- Fixed coarse-group splitting for candidates in sibling directories, preventing
-  Standard Mode from failing while computing relative probe paths.
+- Fixed coarse-group splitting for candidates in sibling directories,
+  preventing Standard Mode from failing while computing relative probe paths.
+
+- Target-aware Standard and Fast Mode now reject non-Linux platforms before
+  any baseline or search command starts, with a message pointing to Linux/WSL
+  or legacy Standard Mode. Previously the run consumed its baseline and
+  search budget before the publisher failed on the unsupported platform.
 
 ### Changed
 
 - Introduced the internal V1.1 failure-oracle contract. Production reduction
   and staging publication now establish and evaluate a shared three-state
-  Oracle baseline (`match`, `no_match`, or `inconclusive`) while retaining the
-  existing Python exception CLI behavior and strict/message compatibility.
+  Oracle baseline (`match`, `no_match`, or `inconclusive`) while retaining
+  the existing Python exception CLI behavior and strict/message compatibility.
 
 - Bounded command execution in the runner. Each command now receives an empty
   standard input, a timed-out command has its descendant processes terminated,
