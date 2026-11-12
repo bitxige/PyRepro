@@ -31,7 +31,12 @@ from pyrepro.reproducer.failure import (
     FailureMatchMode,
     FailureSignature,
     ReductionOutcome,
-    classify_result,
+)
+from pyrepro.reproducer.oracle import (
+    OracleBaseline,
+    OracleDecision,
+    coerce_oracle_baseline,
+    legacy_outcome,
 )
 from pyrepro.reproducer.reducer import (
     DEFAULT_IGNORED_DIRECTORY_NAMES,
@@ -75,7 +80,7 @@ class ContainerEntryDiscovery:
 class ContainerEntryReductionResult:
     """Verified metrics from bounded module-container entry reduction."""
 
-    baseline_signature: FailureSignature
+    baseline_signature: OracleBaseline | FailureSignature
     initial_python_lines: int
     remaining_python_lines: int
     initial_candidates: int
@@ -140,7 +145,7 @@ class GreedyContainerEntryReducer:
     def reduce(
         self,
         workspace: ReductionWorkspace,
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         *,
         budget: ExecutionBudget | None = None,
         verify_final: bool = True,
@@ -190,14 +195,14 @@ class GreedyContainerEntryReducer:
                 source_span=_source_span(dictionary.node),
             )
             try:
-                outcome, record = self._probe_candidate(
+                outcome, removed, record = self._probe_candidate(
                     workspace.root, candidate, baseline_signature, budget
                 )
             except BudgetExhaustedError:
                 budget_exhausted = True
                 break
             records.append(record)
-            if outcome is ReductionOutcome.SAME_FAILURE:
+            if removed:
                 _remove_entries(workspace.root / candidate.file_path, name, keys)
                 accepted += 1
             elif len(keys) > 1:
@@ -245,9 +250,9 @@ class GreedyContainerEntryReducer:
         self,
         workspace_root: Path,
         candidate: ContainerEntryCandidate,
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         budget: ExecutionBudget | None,
-    ) -> tuple[ReductionOutcome, ProbeRecord]:
+    ) -> tuple[ReductionOutcome, bool, ProbeRecord]:
         """Execute one batch in a fresh probe copy and report its outcome."""
         if budget is not None:
             budget.ensure_can_start(OracleExecutionKind.PROBE)
@@ -266,26 +271,31 @@ class GreedyContainerEntryReducer:
                 self.runner, probe_root, budget, OracleExecutionKind.PROBE
             )
             duration = perf_counter() - started_at
-            outcome = classify_result(
-                result, baseline_signature, probe_root, self.match_mode
-            )
-            return outcome, _probe_record(
-                "container_entry",
-                (Path(candidate.file_path),),
-                result,
+            baseline = coerce_oracle_baseline(baseline_signature, self.match_mode)
+            evaluation = baseline.evaluate(result, probe_root)
+            outcome = legacy_outcome(result, evaluation)
+            removed = evaluation.decision is OracleDecision.MATCH
+            return (
                 outcome,
-                outcome is ReductionOutcome.SAME_FAILURE,
-                duration,
-                probe_root,
-                candidate_python_lines=_python_line_count(
-                    _python_files(probe_root, self.ignored_directory_names)
+                removed,
+                _probe_record(
+                    "container_entry",
+                    (Path(candidate.file_path),),
+                    result,
+                    outcome,
+                    removed,
+                    duration,
+                    probe_root,
+                    candidate_python_lines=_python_line_count(
+                        _python_files(probe_root, self.ignored_directory_names)
+                    ),
+                    candidate_descriptions=(
+                        f"{candidate.file_path}:{candidate.container_name}:"
+                        f"entries={len(candidate.keys)}:keys={','.join(candidate.keys)}:"
+                        f"span={candidate.source_span}",
+                    ),
+                    candidate_rolled_back=not removed,
                 ),
-                candidate_descriptions=(
-                    f"{candidate.file_path}:{candidate.container_name}:"
-                    f"entries={len(candidate.keys)}:keys={','.join(candidate.keys)}:"
-                    f"span={candidate.source_span}",
-                ),
-                candidate_rolled_back=outcome is not ReductionOutcome.SAME_FAILURE,
             )
 
 

@@ -18,8 +18,12 @@ from pyrepro.reproducer.budget import (
 from pyrepro.reproducer.failure import (
     FailureMatchMode,
     FailureSignature,
-    ReductionOutcome,
-    classify_result,
+)
+from pyrepro.reproducer.oracle import (
+    OracleBaseline,
+    OracleDecision,
+    coerce_oracle_baseline,
+    legacy_outcome,
 )
 from pyrepro.reproducer.reducer import (
     DEFAULT_IGNORED_DIRECTORY_NAMES,
@@ -59,7 +63,7 @@ class CoarseFileReducer:
     def reduce(
         self,
         workspace: ReductionWorkspace,
-        baseline: FailureSignature,
+        baseline: OracleBaseline | FailureSignature,
         match_mode: FailureMatchMode,
         pytest_node: str | None = None,
         *,
@@ -118,7 +122,7 @@ class CoarseFileReducer:
         self,
         root: Path,
         group: tuple[Path, ...],
-        baseline: FailureSignature,
+        baseline: OracleBaseline | FailureSignature,
         match_mode: FailureMatchMode,
         split: bool,
         budget: ExecutionBudget | None,
@@ -139,7 +143,9 @@ class CoarseFileReducer:
                     self.runner, probe_root, kind=OracleExecutionKind.PROBE
                 )
             duration = perf_counter() - started
-            outcome = classify_result(result, baseline, probe_root, match_mode)
+            oracle_baseline = coerce_oracle_baseline(baseline, match_mode)
+            evaluation = oracle_baseline.evaluate(result, probe_root)
+            outcome = legacy_outcome(result, evaluation)
             from pyrepro.reproducer.reducer import _probe_record
 
             record = _probe_record(
@@ -147,7 +153,7 @@ class CoarseFileReducer:
                 relative,
                 result,
                 outcome,
-                outcome is ReductionOutcome.SAME_FAILURE,
+                evaluation.decision is OracleDecision.MATCH,
                 duration,
                 probe_root,
                 root,

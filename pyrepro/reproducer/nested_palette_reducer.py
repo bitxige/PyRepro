@@ -30,12 +30,17 @@ from pyrepro.reproducer.failure import (
     FailureMatchMode,
     FailureSignature,
     ReductionOutcome,
-    classify_result,
 )
 from pyrepro.reproducer.list_entry_reducer import (
     _apply_ranges,
     _item_range,
     _line_starts,
+)
+from pyrepro.reproducer.oracle import (
+    OracleBaseline,
+    OracleDecision,
+    coerce_oracle_baseline,
+    legacy_outcome,
 )
 from pyrepro.reproducer.reducer import (
     DEFAULT_IGNORED_DIRECTORY_NAMES,
@@ -74,7 +79,7 @@ class NestedPaletteDiscovery:
 class NestedPaletteReductionResult:
     """Verified metrics from bounded nested-palette entry reduction."""
 
-    baseline_signature: FailureSignature
+    baseline_signature: OracleBaseline | FailureSignature
     initial_python_lines: int
     remaining_python_lines: int
     initial_candidates: int
@@ -133,7 +138,7 @@ class GreedyNestedPaletteReducer:
     def reduce(
         self,
         workspace: ReductionWorkspace,
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         *,
         budget: ExecutionBudget | None = None,
         verify_final: bool = True,
@@ -175,14 +180,14 @@ class GreedyNestedPaletteReducer:
                 source_span=_source_span(palette.list_node),
             )
             try:
-                outcome, record = self._probe_candidate(
+                outcome, removed, record = self._probe_candidate(
                     workspace.root, candidate, baseline_signature, budget
                 )
             except BudgetExhaustedError:
                 budget_exhausted = True
                 break
             records.append(record)
-            if outcome is ReductionOutcome.SAME_FAILURE:
+            if removed:
                 _remove_palette_entries(workspace.root, candidate)
                 accepted += 1
                 pending.clear()
@@ -236,9 +241,9 @@ class GreedyNestedPaletteReducer:
         self,
         workspace_root: Path,
         candidate: NestedPaletteCandidate,
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         budget: ExecutionBudget | None,
-    ) -> tuple[ReductionOutcome, ProbeRecord]:
+    ) -> tuple[ReductionOutcome, bool, ProbeRecord]:
         """Run one entry batch in an isolated workspace copy."""
         if budget is not None:
             budget.ensure_can_start(OracleExecutionKind.PROBE)
@@ -253,26 +258,31 @@ class GreedyNestedPaletteReducer:
                 self.runner, probe_root, budget, OracleExecutionKind.PROBE
             )
             duration = perf_counter() - started_at
-            outcome = classify_result(
-                execution, baseline_signature, probe_root, self.match_mode
-            )
-            return outcome, _probe_record(
-                "nested_list_entry",
-                (Path(candidate.file_path),),
-                execution,
+            baseline = coerce_oracle_baseline(baseline_signature, self.match_mode)
+            evaluation = baseline.evaluate(execution, probe_root)
+            outcome = legacy_outcome(execution, evaluation)
+            removed = evaluation.decision is OracleDecision.MATCH
+            return (
                 outcome,
-                outcome is ReductionOutcome.SAME_FAILURE,
-                duration,
-                probe_root,
-                candidate_python_lines=_python_line_count(
-                    _python_files(probe_root, self.ignored_directory_names)
+                removed,
+                _probe_record(
+                    "nested_list_entry",
+                    (Path(candidate.file_path),),
+                    execution,
+                    outcome,
+                    removed,
+                    duration,
+                    probe_root,
+                    candidate_python_lines=_python_line_count(
+                        _python_files(probe_root, self.ignored_directory_names)
+                    ),
+                    candidate_descriptions=(
+                        f"{candidate.file_path}:{candidate.binding_name}:"
+                        f"indices={candidate.entry_indices}:"
+                        f"span={candidate.source_span}",
+                    ),
+                    candidate_rolled_back=not removed,
                 ),
-                candidate_descriptions=(
-                    f"{candidate.file_path}:{candidate.binding_name}:"
-                    f"indices={candidate.entry_indices}:"
-                    f"span={candidate.source_span}",
-                ),
-                candidate_rolled_back=outcome is not ReductionOutcome.SAME_FAILURE,
             )
 
 

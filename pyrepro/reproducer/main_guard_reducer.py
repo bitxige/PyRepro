@@ -23,7 +23,12 @@ from pyrepro.reproducer.failure import (
     FailureMatchMode,
     FailureSignature,
     ReductionOutcome,
-    classify_result,
+)
+from pyrepro.reproducer.oracle import (
+    OracleBaseline,
+    OracleDecision,
+    coerce_oracle_baseline,
+    legacy_outcome,
 )
 from pyrepro.reproducer.reducer import (
     DEFAULT_IGNORED_DIRECTORY_NAMES,
@@ -66,7 +71,7 @@ class MainGuardDiscovery:
 class MainGuardReductionResult:
     """Verified metrics from bounded module-level main-guard reduction."""
 
-    baseline_signature: FailureSignature
+    baseline_signature: OracleBaseline | FailureSignature
     initial_python_lines: int
     remaining_python_lines: int
     initial_candidates: int
@@ -112,7 +117,7 @@ class GreedyMainGuardReducer:
     def reduce(
         self,
         workspace: ReductionWorkspace,
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         *,
         budget: ExecutionBudget | None = None,
         verify_final: bool = True,
@@ -137,14 +142,14 @@ class GreedyMainGuardReducer:
                 break
             batch = pending.popleft()
             try:
-                outcome, record = self._probe_batch(
+                outcome, removed, record = self._probe_batch(
                     workspace.root, batch, baseline_signature, budget
                 )
             except BudgetExhaustedError:
                 budget_exhausted = True
                 break
             records.append(record)
-            if outcome is ReductionOutcome.SAME_FAILURE:
+            if removed:
                 _remove_main_guard_batch(workspace.root, batch)
                 accepted += 1
                 pending.clear()
@@ -199,9 +204,9 @@ class GreedyMainGuardReducer:
         self,
         workspace_root: Path,
         batch: tuple[MainGuardCandidate, ...],
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         budget: ExecutionBudget | None,
-    ) -> tuple[ReductionOutcome, ProbeRecord]:
+    ) -> tuple[ReductionOutcome, bool, ProbeRecord]:
         """Run one main-guard batch in an isolated disposable workspace."""
         if budget is not None:
             budget.ensure_can_start(OracleExecutionKind.PROBE)
@@ -214,26 +219,31 @@ class GreedyMainGuardReducer:
                 self.runner, probe_root, budget, OracleExecutionKind.PROBE
             )
             duration = perf_counter() - started_at
-            outcome = classify_result(
-                result, baseline_signature, probe_root, self.match_mode
-            )
-            return outcome, _probe_record(
-                "main_guard",
-                tuple(Path(candidate.file_path) for candidate in batch),
-                result,
+            baseline = coerce_oracle_baseline(baseline_signature, self.match_mode)
+            evaluation = baseline.evaluate(result, probe_root)
+            outcome = legacy_outcome(result, evaluation)
+            removed = evaluation.decision is OracleDecision.MATCH
+            return (
                 outcome,
-                outcome is ReductionOutcome.SAME_FAILURE,
-                duration,
-                probe_root,
-                candidate_python_lines=_python_line_count(
-                    _python_files(probe_root, self.ignored_directory_names)
+                removed,
+                _probe_record(
+                    "main_guard",
+                    tuple(Path(candidate.file_path) for candidate in batch),
+                    result,
+                    outcome,
+                    removed,
+                    duration,
+                    probe_root,
+                    candidate_python_lines=_python_line_count(
+                        _python_files(probe_root, self.ignored_directory_names)
+                    ),
+                    candidate_descriptions=tuple(
+                        f"{candidate.file_path}:{candidate.start_line}-"
+                        f"{candidate.end_line}:main_guard:span={candidate.source_span}"
+                        for candidate in batch
+                    ),
+                    candidate_rolled_back=not removed,
                 ),
-                candidate_descriptions=tuple(
-                    f"{candidate.file_path}:{candidate.start_line}-"
-                    f"{candidate.end_line}:main_guard:span={candidate.source_span}"
-                    for candidate in batch
-                ),
-                candidate_rolled_back=outcome is not ReductionOutcome.SAME_FAILURE,
             )
 
 
