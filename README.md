@@ -111,8 +111,9 @@ Standard Mode to the shared production pipeline described below.
 execution-verified candidate probe. Each record includes the phase, proposed
 candidate paths and optional binding-level details, oracle outcome, acceptance
 decision, configured Oracle type, bounded decision reason/evidence, command
-duration, cumulative command time, proposed candidate Python
-LOC, return code, parsed exception details, failure signature, and whether a
+duration, cumulative command time, timeout status, whether each captured stream
+was truncated, proposed candidate Python LOC, return code, parsed exception
+details, failure signature, and whether a
 rejected source-edit candidate was rolled back. The path
 must be new and outside the source project. This observability output does not
 alter reduction decisions.

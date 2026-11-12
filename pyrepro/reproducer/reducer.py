@@ -118,6 +118,9 @@ class ProbeRecord:
             reducer's retained state.
         candidate_rolled_back: Whether a rejected source-edit candidate was
             discarded without changing the active workspace.
+        timed_out: Whether the command exceeded its timeout.
+        stdout_truncated: Whether captured standard output was truncated.
+        stderr_truncated: Whether captured standard error was truncated.
     """
 
     phase: str
@@ -132,6 +135,9 @@ class ProbeRecord:
     candidate_python_lines: int | None = None
     candidate_descriptions: tuple[str, ...] = ()
     candidate_rolled_back: bool = False
+    timed_out: bool = False
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
     oracle_name: str | None = None
     oracle_decision: OracleDecision | None = None
     oracle_reason: str | None = None
@@ -894,6 +900,9 @@ def _probe_record(
         candidate_python_lines=candidate_python_lines,
         candidate_descriptions=tuple(candidate_descriptions),
         candidate_rolled_back=candidate_rolled_back,
+        timed_out=result.timed_out,
+        stdout_truncated=result.stdout_truncated,
+        stderr_truncated=result.stderr_truncated,
         oracle_name=None if oracle_baseline is None else oracle_baseline.name,
         oracle_decision=(
             None if oracle_evaluation is None else oracle_evaluation.decision
