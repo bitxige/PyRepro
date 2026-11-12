@@ -14,6 +14,7 @@ from pyrepro.reproducer.failure import (
     classify_result,
 )
 from pyrepro.reproducer.import_pruner import BatchImportPruner
+from pyrepro.reproducer.oracle import ExitCodeOracle
 from pyrepro.reproducer.preprocessing import (
     PRODUCTION_REDUCER_STAGE_ORDER,
     FixedPointPipelineReducer,
@@ -294,6 +295,54 @@ def test_fixed_point_pipeline_restarts_after_an_accepted_earlier_edit(
         assert result.sweeps[0].import_pruning.accepted_probes == 1
         assert result.sweeps[1].import_pruning.baseline_runs == 0
         assert not (workspace.root / "ballast.py").exists()
+
+    assert tree_digest(tmp_path) == digest
+
+
+def test_pipeline_survives_sweep_that_removes_the_pytest_node_file(
+    tmp_path: Path,
+):
+    """A custom-Oracle command may keep failing without the node file.
+
+    When an external adapter drives the failure, the greedy file stage can
+    delete the pytest-node test file in an early sweep. The next sweep's
+    import-pruning stage must treat the missing target as zero candidates
+    instead of raising a runtime error.
+    """
+    _write(tmp_path, "run_target.py", "raise SystemExit(42)\n")
+    _write(tmp_path, "tests/__init__.py", "")
+    _write(
+        tmp_path,
+        "tests/test_target.py",
+        "def test_failure():\n    assert False\n",
+    )
+    digest = tree_digest(tmp_path)
+    runner = CommandRunner([sys.executable, "run_target.py"], timeout_seconds=2)
+
+    with ReductionWorkspace(tmp_path) as workspace:
+        result = FixedPointPipelineReducer(
+            runner,
+            "tests/test_target.py::test_failure",
+            limits=PipelineProbeLimits(
+                import_pruning=4,
+                coarse=0,
+                symbol=0,
+                method=0,
+                if_statement=0,
+                container_entry=0,
+                list_entry=0,
+                main_guard=0,
+                nested_list_entry=0,
+            ),
+            oracle=ExitCodeOracle(42),
+        ).reduce(workspace)
+
+        assert result.fixed_point_reached
+        assert not result.budget_exhausted
+        assert len(result.sweeps) >= 2
+        assert result.sweeps[1].import_pruning.candidates_discovered == 0
+        assert not (workspace.root / "tests/test_target.py").exists()
+        assert (workspace.root / "run_target.py").exists()
 
     assert tree_digest(tmp_path) == digest
 
