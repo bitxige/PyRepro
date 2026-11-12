@@ -11,7 +11,7 @@ from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from time import monotonic
+from time import monotonic, perf_counter
 from typing import BinaryIO
 
 _OUTPUT_CHUNK_BYTES = 64 * 1024
@@ -30,6 +30,7 @@ class ExecutionResult:
         stdout: Captured standard output tail.
         stderr: Captured standard error tail.
         timed_out: Whether the command exceeded the configured timeout.
+        duration_seconds: Wall-clock duration of the command execution.
         stdout_truncated: Whether standard output exceeded the retained tail.
         stderr_truncated: Whether standard error exceeded the retained tail.
     """
@@ -41,6 +42,7 @@ class ExecutionResult:
     timed_out: bool
     stdout_truncated: bool = False
     stderr_truncated: bool = False
+    duration_seconds: float = 0.0
 
 
 class CommandRunner:
@@ -122,6 +124,7 @@ class CommandRunner:
             self._on_execution_start()
         environment = dict(os.environ)
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        started_at = perf_counter()
         process = subprocess.Popen(
             self.command,
             stdin=subprocess.DEVNULL,
@@ -157,6 +160,7 @@ class CommandRunner:
             _terminate_process_tree(process)
             return_code = process.wait()
         _finish_readers(readers, process)
+        duration_seconds = perf_counter() - started_at
         return ExecutionResult(
             command=self.command,
             return_code=None if timed_out else return_code,
@@ -165,6 +169,7 @@ class CommandRunner:
             timed_out=timed_out,
             stdout_truncated=stdout_capture.truncated,
             stderr_truncated=stderr_capture.truncated,
+            duration_seconds=duration_seconds,
         )
 
 

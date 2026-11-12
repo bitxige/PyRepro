@@ -120,9 +120,10 @@ alter reduction decisions.
 
 `--json-report <path>` and `--html-report <path>` optionally write final
 result reports. They are separate from probe telemetry: each report summarizes
-the completed reduction's size, Oracle cost, stage metrics, source integrity,
-publication status, final verification, and configured Oracle type/configuration
-and decision counts. Both paths must be new and outside
+the completed reduction's original argv command, size, Oracle cost, stage
+metrics, source integrity, publication status, final verification, and
+configured Oracle type/configuration and decision counts. Both paths must be
+new and outside
 the source project. The HTML report is rendered from the same data as the JSON
 report. In Fast Mode, an unpublished terminal state remains explicitly marked
 as unverified and unpublished.

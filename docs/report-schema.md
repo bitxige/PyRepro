@@ -4,16 +4,17 @@
 completed reduction attempt. The JSON document is the canonical report data;
 the optional HTML report is a presentation of the same mapping.
 
-This document describes schema version 3. An unavailable value is represented
+This document describes schema version 4. An unavailable value is represented
 as `null`; a missing optional stage is not invented by the reporter.
 
 ## Top-level fields
 
 | Field | Meaning |
 | --- | --- |
-| `schema_version` | Integer report schema version. Current value: `3`. |
+| `schema_version` | Integer report schema version. Current value: `4`. |
 | `mode` | Reduction mode: `standard` or `fast`. |
 | `strategy` | Requested file-reduction strategy. |
+| `command` | Original argv reproduction command, or `null` when not supplied. |
 | `size` | Input, accepted-candidate, and—when published—output size facts. |
 | `oracle` | Command-execution accounting. |
 | `timing` | Reduction-only and end-to-end elapsed seconds when available. |

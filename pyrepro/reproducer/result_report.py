@@ -31,7 +31,7 @@ from pyrepro.reproducer.reducer import (
 )
 from pyrepro.reproducer.symbol_reducer import SymbolReductionResult
 
-REPORT_SCHEMA_VERSION = 3
+REPORT_SCHEMA_VERSION = 4
 
 
 def validate_report_paths(
@@ -76,6 +76,7 @@ def build_fast_report(
     publication: PublishingResult,
     *,
     run_wall_clock_seconds: float,
+    command: Sequence[str] | None = None,
 ) -> dict[str, object]:
     """Build one truthful report for a completed Fast-Mode attempt.
 
@@ -84,6 +85,8 @@ def build_fast_report(
         candidate_root: Accepted workspace before staging publication.
         reduction: Completed composed reduction metrics.
         publication: Publisher terminal result and final-verification facts.
+        run_wall_clock_seconds: End-to-end run duration.
+        command: Optional argv reproduction command for provenance.
 
     Returns:
         A JSON-serializable report mapping.  ``candidate`` describes the
@@ -101,6 +104,7 @@ def build_fast_report(
         "schema_version": REPORT_SCHEMA_VERSION,
         "mode": "fast",
         "strategy": "greedy",
+        "command": None if command is None else list(command),
         "size": _size_summary(
             _project_size(source_root),
             _project_size(candidate_root),
@@ -181,6 +185,7 @@ def build_standard_report(
     symbol_result: SymbolReductionResult | None,
     *,
     run_wall_clock_seconds: float,
+    command: Sequence[str] | None = None,
 ) -> dict[str, object]:
     """Build one truthful report for a verified Standard-Mode output.
 
@@ -197,6 +202,7 @@ def build_standard_report(
         "schema_version": REPORT_SCHEMA_VERSION,
         "mode": "standard",
         "strategy": file_result.strategy,
+        "command": None if command is None else list(command),
         "size": _size_summary(
             _project_size(source_root),
             _project_size(output_root),
@@ -249,6 +255,7 @@ def build_standard_pipeline_report(
     publication: PublishingResult,
     *,
     run_wall_clock_seconds: float,
+    command: Sequence[str] | None = None,
 ) -> dict[str, object]:
     """Build a report for the unbounded Standard-Mode reducer pipeline.
 
@@ -267,6 +274,7 @@ def build_standard_pipeline_report(
         "schema_version": REPORT_SCHEMA_VERSION,
         "mode": "standard",
         "strategy": "greedy",
+        "command": None if command is None else list(command),
         "size": _size_summary(
             _project_size(source_root),
             _project_size(publication.output_path),
