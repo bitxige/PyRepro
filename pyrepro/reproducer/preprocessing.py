@@ -30,6 +30,11 @@ from pyrepro.reproducer.nested_palette_reducer import (
     GreedyNestedPaletteReducer,
     NestedPaletteReductionResult,
 )
+from pyrepro.reproducer.oracle import (
+    FailureOracle,
+    OracleBaseline,
+    PythonExceptionOracle,
+)
 from pyrepro.reproducer.reducer import (
     DEFAULT_IGNORED_DIRECTORY_NAMES,
     GreedyFileReducer,
@@ -118,7 +123,7 @@ class PipelineProbeLimits:
 class PipelineReductionResult:
     """Aggregate all sweeps of the shared production reducer pipeline."""
 
-    baseline_signature: FailureSignature
+    baseline_signature: OracleBaseline
     sweeps: tuple[PreprocessingReductionResult, ...]
     baseline_executions: int
     search_executions: int
@@ -156,6 +161,7 @@ class PreprocessingFirstReducer:
         max_main_guard_probes: int | None = 0,
         max_nested_list_entry_probes: int | None = 0,
         symbol_order: SymbolOrder = SymbolOrder.DISCOVERY,
+        oracle: FailureOracle | None = None,
     ) -> None:
         """Configure the preprocessing-first reduction pipeline.
 
@@ -206,6 +212,7 @@ class PreprocessingFirstReducer:
         self.max_main_guard_probes = max_main_guard_probes
         self.max_nested_list_entry_probes = max_nested_list_entry_probes
         self.symbol_order = symbol_order
+        self.oracle = oracle or PythonExceptionOracle(match_mode, expected_text)
 
     def reduce(
         self,
@@ -213,7 +220,7 @@ class PreprocessingFirstReducer:
         *,
         budget: ExecutionBudget | None = None,
         verify_stage_finals: bool | None = None,
-        baseline_signature: FailureSignature | None = None,
+        baseline_signature: OracleBaseline | FailureSignature | None = None,
     ) -> PreprocessingReductionResult:
         """Run composed stages with one baseline and optional shared budget."""
         started = perf_counter()
@@ -226,6 +233,7 @@ class PreprocessingFirstReducer:
                 expected_text=self.expected_text,
                 match_mode=self.match_mode,
                 max_probes=self.max_import_probes,
+                oracle=self.oracle,
             ).prune(
                 workspace,
                 baseline_signature,
@@ -483,6 +491,7 @@ class FixedPointPipelineReducer:
         match_mode: FailureMatchMode = FailureMatchMode.STRICT,
         limits: PipelineProbeLimits = PipelineProbeLimits(),
         symbol_order: SymbolOrder = SymbolOrder.DISCOVERY,
+        oracle: FailureOracle | None = None,
     ) -> None:
         """Configure the shared pipeline and its execution policy."""
         self.runner = runner
@@ -491,6 +500,7 @@ class FixedPointPipelineReducer:
         self.match_mode = match_mode
         self.limits = limits
         self.symbol_order = symbol_order
+        self.oracle = oracle or PythonExceptionOracle(match_mode, expected_text)
 
     def reduce(
         self,
@@ -510,7 +520,7 @@ class FixedPointPipelineReducer:
         started = perf_counter()
         consumed = {stage: 0 for stage in PRODUCTION_REDUCER_STAGE_ORDER}
         sweeps: list[PreprocessingReductionResult] = []
-        baseline: FailureSignature | None = None
+        baseline: OracleBaseline | FailureSignature | None = None
         fixed_point = False
         budget_exhausted = False
 
@@ -534,6 +544,7 @@ class FixedPointPipelineReducer:
                     consumed, "nested_list_entry"
                 ),
                 symbol_order=self.symbol_order,
+                oracle=self.oracle,
             ).reduce(
                 workspace,
                 budget=budget,

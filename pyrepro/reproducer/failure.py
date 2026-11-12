@@ -6,8 +6,12 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pyrepro.reproducer.runner import ExecutionResult
+
+if TYPE_CHECKING:
+    from pyrepro.reproducer.oracle import OracleBaseline
 
 _TRACEBACK_MARKER = "Traceback (most recent call last):"
 _FRAME_PATTERN = re.compile(
@@ -95,7 +99,7 @@ class FailureSignature:
 
 def classify_result(
     result: ExecutionResult,
-    baseline: FailureSignature,
+    baseline: FailureSignature | OracleBaseline,
     workspace_root: Path,
     match_mode: FailureMatchMode = FailureMatchMode.STRICT,
 ) -> ReductionOutcome:
@@ -112,6 +116,13 @@ def classify_result(
     Returns:
         The candidate reduction outcome.
     """
+    # ``FailureSignature`` remains accepted for legacy integrations and
+    # controlled-study code. Production reducers establish an
+    # ``OracleBaseline`` and reach the generic oracle branch below.
+    if not isinstance(baseline, FailureSignature):
+        from pyrepro.reproducer.oracle import legacy_outcome
+
+        return legacy_outcome(result, baseline.evaluate(result, workspace_root))
     if result.timed_out:
         return ReductionOutcome.TIMEOUT
     if result.return_code == 0:

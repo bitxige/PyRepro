@@ -11,13 +11,12 @@ from time import perf_counter
 from pyrepro.reproducer.budget import BudgetExhaustedError, ExecutionBudget
 from pyrepro.reproducer.failure import (
     FailureMatchMode,
-    ReductionOutcome,
-    classify_result,
 )
 from pyrepro.reproducer.import_pruner import (
     BatchImportPruner,
     format_import_pruning_summary,
 )
+from pyrepro.reproducer.oracle import OracleDecision
 from pyrepro.reproducer.preprocessing import (
     FixedPointPipelineReducer,
     PipelineProbeLimits,
@@ -383,18 +382,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                     ).reduce(workspace, file_result.baseline_signature)
                 destination = workspace.copy_reduced_to(output)
                 output_result = runner.run(destination)
-                output_outcome = classify_result(
-                    output_result,
-                    file_result.baseline_signature,
-                    destination,
-                    match_mode,
+                output_evaluation = file_result.baseline_signature.evaluate(
+                    output_result, destination
                 )
     except BudgetExhaustedError as error:
         parser.error(f"Standard Mode stopped before verification: {error}")
     except (OSError, UnstableBaselineError, ValueError) as error:
         parser.error(str(error))
 
-    if output_outcome is not ReductionOutcome.SAME_FAILURE:
+    if output_evaluation.decision is not OracleDecision.MATCH:
         parser.error("copied reduced project did not reproduce the baseline failure")
 
     if probe_report is not None:
@@ -938,16 +934,13 @@ def _prune_imports(
             result = pruner.prune(workspace)
             destination = workspace.copy_reduced_to(output)
             output_result = runner.run(destination)
-            output_outcome = classify_result(
-                output_result,
-                result.baseline_signature,
-                destination,
-                match_mode,
+            output_evaluation = result.baseline_signature.evaluate(
+                output_result, destination
             )
     except (OSError, UnstableBaselineError, ValueError) as error:
         parser.error(str(error))
 
-    if output_outcome is not ReductionOutcome.SAME_FAILURE:
+    if output_evaluation.decision is not OracleDecision.MATCH:
         parser.error("copied pruned project did not reproduce the baseline failure")
     if probe_report is not None:
         try:

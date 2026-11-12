@@ -277,7 +277,7 @@ def _run_strategy(
         initial_python_lines=initial_lines,
         remaining_python_files=len(remaining_files),
         remaining_python_lines=remaining_lines,
-        baseline_failure_signature=asdict(baseline),
+        baseline_failure_signature=asdict(baseline.exception_signature),
         phase_executions=dict(sorted(phase_executions.items())),
         phase_probe_counts=dict(sorted(phase_counts.items())),
         phase_accepted_probes=dict(sorted(accepted_counts.items())),

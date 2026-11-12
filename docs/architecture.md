@@ -74,7 +74,8 @@ pyrepro/
 ├── __main__.py                # PyRepro module entry point
 ├── reproducer/
 │   ├── runner.py              # argv command execution and captured output
-│   ├── failure.py             # failure signatures and outcome classification
+│   ├── failure.py             # legacy exception signatures and compatibility data
+│   ├── oracle.py              # shared three-state failure-oracle contract
 │   ├── workspace.py           # disposable copies and source-integrity checks
 │   ├── reducer.py             # greedy/grouped reduction and candidate exclusions
 │   ├── import_pruner.py        # bounded verified source-local import pruning
@@ -159,7 +160,7 @@ verified preprocessing with repository reduction.
 `shell=False`. It records exit status, standard output, standard error, and
 timeouts. It does not install dependencies or interpret shell text.
 
-### `reproducer.failure`
+### `reproducer.failure` and `reproducer.oracle`
 
 `FailureSignature` identifies an uncaught Python exception by exception type,
 normalized message, and final repository-relative traceback frame. Line
@@ -172,6 +173,14 @@ acceptance policy.
 P1 establishes the signature three times before reduction. An optional
 `--expect` text anchor must match that stable signature. A disagreement aborts
 the run rather than treating a flaky or unintended failure as reducible.
+
+The V1.1 oracle boundary separates execution from acceptance: an Oracle first
+establishes a stable baseline and then returns `match`, `no_match`, or
+`inconclusive` for every candidate. Only `match` permits a reducer to retain
+an edit; timeouts and incomplete evidence remain non-accepting. The current
+`PythonExceptionOracle` preserves the existing strict and message-only
+exception behavior. Future configured Oracle types must use the same boundary
+rather than bypassing reducer rollback or final staging verification.
 
 ### `reproducer.workspace`
 

@@ -16,8 +16,15 @@ from pyrepro.reproducer.failure import (
     FailureMatchMode,
     FailureSignature,
     ReductionOutcome,
-    classify_result,
     exception_details,
+)
+from pyrepro.reproducer.oracle import (
+    FailureOracle,
+    OracleBaseline,
+    OracleDecision,
+    PythonExceptionOracle,
+    coerce_oracle_baseline,
+    legacy_outcome,
 )
 from pyrepro.reproducer.reducer import (
     DEFAULT_IGNORED_DIRECTORY_NAMES,
@@ -38,7 +45,7 @@ from pyrepro.scanner.import_analyzer import ImportAnalyzer, ImportCandidate
 class ImportPruningResult:
     """Final-verified result of a target-aware import-pruning run."""
 
-    baseline_signature: FailureSignature
+    baseline_signature: OracleBaseline
     baseline_runs: int
     candidates_discovered: int
     editable_operations: int
@@ -110,6 +117,7 @@ class BatchImportPruner:
         expected_text: str | None = None,
         match_mode: FailureMatchMode = FailureMatchMode.STRICT,
         max_probes: int | None = 16,
+        oracle: FailureOracle | None = None,
     ) -> None:
         """Configure a bounded import-pruning run."""
         if baseline_runs <= 0:
@@ -122,11 +130,12 @@ class BatchImportPruner:
         self.expected_text = _normalize_expected_text(expected_text)
         self.match_mode = match_mode
         self.max_probes = max_probes
+        self.oracle = oracle or PythonExceptionOracle(match_mode, self.expected_text)
 
     def prune(
         self,
         workspace: ReductionWorkspace,
-        baseline_signature: FailureSignature | None = None,
+        baseline_signature: OracleBaseline | FailureSignature | None = None,
         *,
         budget: ExecutionBudget | None = None,
         verify_final: bool = True,
@@ -150,10 +159,11 @@ class BatchImportPruner:
                 self.expected_text,
                 self.match_mode,
                 budget,
+                oracle=self.oracle,
             )
             baseline_runs = self.baseline_runs
         else:
-            baseline = baseline_signature
+            baseline = coerce_oracle_baseline(baseline_signature, self.match_mode)
             executions = 0
             baseline_runs = 0
         analysis = ImportAnalyzer(workspace.root).analyze_pytest_node(self.pytest_node)
@@ -232,7 +242,7 @@ class BatchImportPruner:
         self,
         root: Path,
         operations: tuple[_Operation, ...],
-        baseline: FailureSignature,
+        baseline: OracleBaseline | FailureSignature,
         budget: int | None,
         execution_budget: ExecutionBudget | None,
     ) -> tuple[list[ProbeRecord], int, int, bool]:
@@ -307,7 +317,7 @@ class BatchImportPruner:
         self,
         root: Path,
         operations: tuple[_Operation, ...],
-        baseline: FailureSignature,
+        baseline: OracleBaseline,
         budget: ExecutionBudget | None,
     ) -> tuple[ProbeRecord, bool]:
         if budget is not None:
@@ -323,9 +333,11 @@ class BatchImportPruner:
                 self.runner, root, budget, OracleExecutionKind.PROBE
             )
             duration = perf_counter() - started
-            outcome = classify_result(execution, baseline, root, self.match_mode)
+            oracle_baseline = coerce_oracle_baseline(baseline, self.match_mode)
+            evaluation = oracle_baseline.evaluate(execution, root)
+            outcome = legacy_outcome(execution, evaluation)
             proposed_lines = _line_count(root)
-            accepted = outcome is ReductionOutcome.SAME_FAILURE
+            accepted = evaluation.decision is OracleDecision.MATCH
             details = exception_details(execution)
             error_type, error_message = details or (None, None)
             return (

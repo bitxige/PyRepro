@@ -17,6 +17,11 @@ experiments remain available through Git history.
 
 ### Changed
 
+- Introduced the internal V1.1 failure-oracle contract. Production reduction
+  and staging publication now establish and evaluate a shared three-state
+  Oracle baseline (`match`, `no_match`, or `inconclusive`) while retaining the
+  existing Python exception CLI behavior and strict/message compatibility.
+
 - Bounded command execution in the runner. Each command now receives an empty
   standard input, a timed-out command has its descendant processes terminated,
   and each captured output stream retains only its final 4 MiB (including a
