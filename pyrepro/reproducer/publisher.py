@@ -22,7 +22,12 @@ from pyrepro.reproducer.failure import (
     FailureMatchMode,
     FailureSignature,
     ReductionOutcome,
-    classify_result,
+)
+from pyrepro.reproducer.oracle import (
+    OracleBaseline,
+    OracleDecision,
+    coerce_oracle_baseline,
+    legacy_outcome,
 )
 from pyrepro.reproducer.runner import CommandRunner
 from pyrepro.reproducer.workspace import ReductionWorkspace
@@ -94,7 +99,7 @@ class PublishingResult:
 def verify_and_publish(
     workspace: ReductionWorkspace,
     runner: CommandRunner,
-    baseline_signature: FailureSignature,
+    baseline_signature: OracleBaseline | FailureSignature,
     match_mode: FailureMatchMode,
     destination: Path,
     budget: ExecutionBudget | None,
@@ -126,6 +131,7 @@ def verify_and_publish(
         ValueError: If the destination is invalid before staging begins.
     """
     output = _validate_destination(destination, workspace.source_root)
+    baseline = coerce_oracle_baseline(baseline_signature, match_mode)
     attempts: list[FinalVerificationAttempt] = []
     staging: Path | None = None
     published = False
@@ -180,9 +186,8 @@ def verify_and_publish(
                     str(error),
                 )
 
-            outcome = classify_result(
-                execution, baseline_signature, staging, match_mode
-            )
+            evaluation = baseline.evaluate(execution, staging)
+            outcome = legacy_outcome(execution, evaluation)
             attempts.append(
                 FinalVerificationAttempt(
                     outcome=outcome,
@@ -191,7 +196,7 @@ def verify_and_publish(
                     timed_out=execution.timed_out,
                 )
             )
-            if outcome is not ReductionOutcome.SAME_FAILURE:
+            if evaluation.decision is not OracleDecision.MATCH:
                 return _with_source_precedence(
                     FastModeTerminalState.FINAL_VERIFICATION_FAILED,
                     attempts,

@@ -29,7 +29,12 @@ from pyrepro.reproducer.failure import (
     FailureMatchMode,
     FailureSignature,
     ReductionOutcome,
-    classify_result,
+)
+from pyrepro.reproducer.oracle import (
+    OracleBaseline,
+    OracleDecision,
+    coerce_oracle_baseline,
+    legacy_outcome,
 )
 from pyrepro.reproducer.reducer import (
     DEFAULT_IGNORED_DIRECTORY_NAMES,
@@ -93,7 +98,7 @@ class IfStatementDiscovery:
 class IfStatementReductionResult:
     """Verified outcome metrics from one greedy complete-if experiment."""
 
-    baseline_signature: FailureSignature
+    baseline_signature: OracleBaseline | FailureSignature
     initial_python_lines: int
     remaining_python_lines: int
     initial_candidates: int
@@ -140,7 +145,7 @@ class GreedyIfStatementReducer:
     def reduce(
         self,
         workspace: ReductionWorkspace,
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         *,
         budget: ExecutionBudget | None = None,
         verify_final: bool = True,
@@ -174,14 +179,14 @@ class GreedyIfStatementReducer:
             if candidate is None:
                 break
             try:
-                outcome, record = self._probe_candidate(
+                outcome, removed, record = self._probe_candidate(
                     workspace.root, candidate, baseline_signature, budget
                 )
             except BudgetExhaustedError:
                 budget_exhausted = True
                 break
             records.append(record)
-            if outcome is ReductionOutcome.SAME_FAILURE:
+            if removed:
                 _remove_if_statement(workspace.root / candidate.file_path, candidate)
                 accepted += 1
             else:
@@ -227,9 +232,9 @@ class GreedyIfStatementReducer:
         self,
         workspace_root: Path,
         candidate: IfStatementCandidate,
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         budget: ExecutionBudget | None,
-    ) -> tuple[ReductionOutcome, ProbeRecord]:
+    ) -> tuple[ReductionOutcome, bool, ProbeRecord]:
         """Probe one complete-if deletion in a disposable project copy."""
         if budget is not None:
             budget.ensure_can_start(OracleExecutionKind.PROBE)
@@ -242,27 +247,32 @@ class GreedyIfStatementReducer:
                 self.runner, probe_root, budget, OracleExecutionKind.PROBE
             )
             duration = perf_counter() - started_at
-            outcome = classify_result(
-                result, baseline_signature, probe_root, self.match_mode
-            )
-            return outcome, _probe_record(
-                "if_statement",
-                (Path(candidate.file_path),),
-                result,
+            baseline = coerce_oracle_baseline(baseline_signature, self.match_mode)
+            evaluation = baseline.evaluate(result, probe_root)
+            outcome = legacy_outcome(result, evaluation)
+            removed = evaluation.decision is OracleDecision.MATCH
+            return (
                 outcome,
-                outcome is ReductionOutcome.SAME_FAILURE,
-                duration,
-                probe_root,
-                candidate_python_lines=_python_line_count(
-                    _python_files(probe_root, self.ignored_directory_names)
+                removed,
+                _probe_record(
+                    "if_statement",
+                    (Path(candidate.file_path),),
+                    result,
+                    outcome,
+                    removed,
+                    duration,
+                    probe_root,
+                    candidate_python_lines=_python_line_count(
+                        _python_files(probe_root, self.ignored_directory_names)
+                    ),
+                    candidate_descriptions=(
+                        f"{candidate.file_path}:{candidate.owner_qualified_name}:"
+                        f"{candidate.start_line}-{candidate.end_line}:if_statement:"
+                        f"{'/'.join(candidate.control_path) or 'direct'}:"
+                        f"requires_pass={candidate.requires_pass}",
+                    ),
+                    candidate_rolled_back=not removed,
                 ),
-                candidate_descriptions=(
-                    f"{candidate.file_path}:{candidate.owner_qualified_name}:"
-                    f"{candidate.start_line}-{candidate.end_line}:if_statement:"
-                    f"{'/'.join(candidate.control_path) or 'direct'}:"
-                    f"requires_pass={candidate.requires_pass}",
-                ),
-                candidate_rolled_back=outcome is not ReductionOutcome.SAME_FAILURE,
             )
 
 

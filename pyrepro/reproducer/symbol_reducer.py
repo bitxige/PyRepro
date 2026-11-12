@@ -21,7 +21,12 @@ from pyrepro.reproducer.failure import (
     FailureMatchMode,
     FailureSignature,
     ReductionOutcome,
-    classify_result,
+)
+from pyrepro.reproducer.oracle import (
+    OracleBaseline,
+    OracleDecision,
+    coerce_oracle_baseline,
+    legacy_outcome,
 )
 from pyrepro.reproducer.reducer import (
     DEFAULT_IGNORED_DIRECTORY_NAMES,
@@ -132,7 +137,7 @@ class SymbolReductionResult:
         budget_exhausted: Whether Fast Mode stopped this stage before a probe.
     """
 
-    baseline_signature: FailureSignature
+    baseline_signature: OracleBaseline | FailureSignature
     failure_match_mode: FailureMatchMode
     initial_python_lines: int
     remaining_python_lines: int
@@ -187,7 +192,7 @@ class GreedySymbolReducer:
     def reduce(
         self,
         workspace: ReductionWorkspace,
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         *,
         budget: ExecutionBudget | None = None,
         verify_final: bool = True,
@@ -242,13 +247,12 @@ class GreedySymbolReducer:
                 break
 
             try:
-                outcome, probe_record = self._probe_candidate(
+                outcome, removed, probe_record = self._probe_candidate(
                     workspace.root, candidate, baseline_signature, budget
                 )
             except BudgetExhaustedError:
                 budget_exhausted = True
                 break
-            removed = outcome is ReductionOutcome.SAME_FAILURE
             decisions.append(SymbolDecision(candidate, outcome, removed))
             probe_records.append(probe_record)
             if removed:
@@ -301,9 +305,9 @@ class GreedySymbolReducer:
         self,
         workspace_root: Path,
         candidate: SymbolCandidate,
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         budget: ExecutionBudget | None,
-    ) -> tuple[ReductionOutcome, ProbeRecord]:
+    ) -> tuple[ReductionOutcome, bool, ProbeRecord]:
         """Run one disposable source-span deletion through the shared Oracle."""
         if budget is not None:
             budget.ensure_can_start(OracleExecutionKind.PROBE)
@@ -316,25 +320,30 @@ class GreedySymbolReducer:
                 self.runner, probe_root, budget, OracleExecutionKind.PROBE
             )
             duration_seconds = perf_counter() - started_at
-            outcome = classify_result(
-                result, baseline_signature, probe_root, self.match_mode
-            )
-            return outcome, _probe_record(
-                "symbol",
-                (Path(candidate.file_path),),
-                result,
+            baseline = coerce_oracle_baseline(baseline_signature, self.match_mode)
+            evaluation = baseline.evaluate(result, probe_root)
+            outcome = legacy_outcome(result, evaluation)
+            removed = evaluation.decision is OracleDecision.MATCH
+            return (
                 outcome,
-                outcome is ReductionOutcome.SAME_FAILURE,
-                duration_seconds,
-                probe_root,
-                candidate_python_lines=_python_line_count(
-                    _python_files(probe_root, self.ignored_directory_names)
+                removed,
+                _probe_record(
+                    "symbol",
+                    (Path(candidate.file_path),),
+                    result,
+                    outcome,
+                    removed,
+                    duration_seconds,
+                    probe_root,
+                    candidate_python_lines=_python_line_count(
+                        _python_files(probe_root, self.ignored_directory_names)
+                    ),
+                    candidate_descriptions=(
+                        f"{candidate.file_path}:{candidate.qualified_name}:"
+                        f"{candidate.start_line}-{candidate.end_line}:{candidate.kind}",
+                    ),
+                    candidate_rolled_back=not removed,
                 ),
-                candidate_descriptions=(
-                    f"{candidate.file_path}:{candidate.qualified_name}:"
-                    f"{candidate.start_line}-{candidate.end_line}:{candidate.kind}",
-                ),
-                candidate_rolled_back=outcome is not ReductionOutcome.SAME_FAILURE,
             )
 
 

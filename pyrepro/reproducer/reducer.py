@@ -19,9 +19,16 @@ from pyrepro.reproducer.failure import (
     FailureMatchMode,
     FailureSignature,
     ReductionOutcome,
-    classify_result,
     exception_details,
-    signatures_match,
+)
+from pyrepro.reproducer.oracle import (
+    FailureOracle,
+    OracleBaseline,
+    OracleBaselineError,
+    OracleDecision,
+    PythonExceptionOracle,
+    coerce_oracle_baseline,
+    legacy_outcome,
 )
 from pyrepro.reproducer.runner import CommandRunner, ExecutionResult
 from pyrepro.reproducer.workspace import ReductionWorkspace
@@ -151,7 +158,7 @@ class ReductionResult:
     """
 
     strategy: str
-    baseline_signature: FailureSignature
+    baseline_signature: OracleBaseline
     failure_match_mode: FailureMatchMode
     baseline_runs: int
     initial_python_files: int
@@ -189,6 +196,8 @@ class GreedyFileReducer:
         expected_text: str | None = None,
         match_mode: FailureMatchMode = FailureMatchMode.STRICT,
         ignored_directory_names: Collection[str] = DEFAULT_IGNORED_DIRECTORY_NAMES,
+        *,
+        oracle: FailureOracle | None = None,
     ) -> None:
         """Initialize the greedy reducer.
 
@@ -200,11 +209,12 @@ class GreedyFileReducer:
         self.expected_text = _normalize_expected_text(expected_text)
         self.match_mode = match_mode
         self.ignored_directory_names = frozenset(ignored_directory_names)
+        self.oracle = oracle or PythonExceptionOracle(match_mode, self.expected_text)
 
     def reduce(
         self,
         workspace: ReductionWorkspace,
-        baseline_signature: FailureSignature | None = None,
+        baseline_signature: OracleBaseline | FailureSignature | None = None,
         *,
         budget: ExecutionBudget | None = None,
         verify_final: bool = True,
@@ -235,9 +245,13 @@ class GreedyFileReducer:
                 self.expected_text,
                 self.match_mode,
                 budget,
+                oracle=self.oracle,
             )
             baseline_runs = self.baseline_runs
         else:
+            baseline_signature = coerce_oracle_baseline(
+                baseline_signature, self.match_mode
+            )
             executions = 0
             baseline_runs = 0
         candidates = _python_files(workspace.root, self.ignored_directory_names)
@@ -328,7 +342,7 @@ class GreedyFileReducer:
         workspace_root: Path,
         candidate: Path,
         backup_root: Path,
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         match_mode: FailureMatchMode,
         budget: ExecutionBudget | None = None,
     ) -> tuple[FileDecision, ProbeRecord, int]:
@@ -346,10 +360,10 @@ class GreedyFileReducer:
                 self.runner, workspace_root, budget, OracleExecutionKind.PROBE
             )
             duration_seconds = perf_counter() - started_at
-            outcome = classify_result(
-                result, baseline_signature, workspace_root, match_mode
-            )
-            removed = outcome is ReductionOutcome.SAME_FAILURE
+            baseline = coerce_oracle_baseline(baseline_signature, match_mode)
+            evaluation = baseline.evaluate(result, workspace_root)
+            outcome = legacy_outcome(result, evaluation)
+            removed = evaluation.decision is OracleDecision.MATCH
             return (
                 FileDecision(relative.as_posix(), outcome, removed),
                 _probe_record(
@@ -386,6 +400,8 @@ class DdminFileReducer:
         expected_text: str | None = None,
         match_mode: FailureMatchMode = FailureMatchMode.STRICT,
         ignored_directory_names: Collection[str] = DEFAULT_IGNORED_DIRECTORY_NAMES,
+        *,
+        oracle: FailureOracle | None = None,
     ) -> None:
         """Initialize the grouped reducer.
 
@@ -397,6 +413,7 @@ class DdminFileReducer:
         self.expected_text = _normalize_expected_text(expected_text)
         self.match_mode = match_mode
         self.ignored_directory_names = frozenset(ignored_directory_names)
+        self.oracle = oracle or PythonExceptionOracle(match_mode, self.expected_text)
 
     def reduce(self, workspace: ReductionWorkspace) -> ReductionResult:
         """Run grouped search, greedy cleanup, and 1-minimal verification.
@@ -420,6 +437,7 @@ class DdminFileReducer:
                 self.baseline_runs,
                 self.expected_text,
                 self.match_mode,
+                oracle=self.oracle,
             )
             candidates = _python_files(template_root, self.ignored_directory_names)
             initial_lines = _python_line_count(candidates)
@@ -499,7 +517,7 @@ class DdminFileReducer:
         workspace_root: Path,
         candidates: Sequence[Path],
         retained: tuple[Path, ...],
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         match_mode: FailureMatchMode,
     ) -> tuple[tuple[Path, ...], list[ProbeDecision], list[ProbeRecord]]:
         granularity = 2
@@ -509,7 +527,7 @@ class DdminFileReducer:
             groups = _partition(retained, granularity)
             accepted_retained: tuple[Path, ...] | None = None
             for group in groups:
-                outcome, record = self._probe_retained(
+                outcome, accepted, record = self._probe_retained(
                     workspace_root,
                     candidates,
                     group,
@@ -517,7 +535,6 @@ class DdminFileReducer:
                     match_mode,
                     "subset",
                 )
-                accepted = outcome is ReductionOutcome.SAME_FAILURE
                 probes.append(_probe_decision("subset", group, outcome, accepted))
                 records.append(_with_acceptance(record, accepted))
                 if accepted:
@@ -526,7 +543,7 @@ class DdminFileReducer:
             if accepted_retained is None:
                 for group in groups:
                     complement = tuple(path for path in retained if path not in group)
-                    outcome, record = self._probe_retained(
+                    outcome, accepted, record = self._probe_retained(
                         workspace_root,
                         candidates,
                         complement,
@@ -534,7 +551,6 @@ class DdminFileReducer:
                         match_mode,
                         "complement",
                     )
-                    accepted = outcome is ReductionOutcome.SAME_FAILURE
                     probes.append(
                         _probe_decision("complement", complement, outcome, accepted)
                     )
@@ -556,7 +572,7 @@ class DdminFileReducer:
         workspace_root: Path,
         candidates: Sequence[Path],
         retained: tuple[Path, ...],
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         match_mode: FailureMatchMode,
     ) -> tuple[tuple[Path, ...], list[ProbeDecision], list[ProbeRecord]]:
         probes: list[ProbeDecision] = []
@@ -565,7 +581,7 @@ class DdminFileReducer:
             if candidate not in retained:
                 continue
             proposed = tuple(path for path in retained if path != candidate)
-            outcome, record = self._probe_retained(
+            outcome, accepted, record = self._probe_retained(
                 workspace_root,
                 candidates,
                 proposed,
@@ -573,7 +589,6 @@ class DdminFileReducer:
                 match_mode,
                 "cleanup",
             )
-            accepted = outcome is ReductionOutcome.SAME_FAILURE
             probes.append(_probe_decision("cleanup", proposed, outcome, accepted))
             records.append(_with_acceptance(record, accepted))
             if accepted:
@@ -585,14 +600,14 @@ class DdminFileReducer:
         workspace_root: Path,
         candidates: Sequence[Path],
         retained: tuple[Path, ...],
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         match_mode: FailureMatchMode,
     ) -> tuple[list[ProbeDecision], list[ProbeRecord]]:
         probes: list[ProbeDecision] = []
         records: list[ProbeRecord] = []
         for candidate in retained:
             proposed = tuple(path for path in retained if path != candidate)
-            outcome, record = self._probe_retained(
+            outcome, accepted, record = self._probe_retained(
                 workspace_root,
                 candidates,
                 proposed,
@@ -603,7 +618,7 @@ class DdminFileReducer:
             probe = _probe_decision("minimality", proposed, outcome, False)
             probes.append(probe)
             records.append(record)
-            if outcome is ReductionOutcome.SAME_FAILURE:
+            if accepted:
                 raise UnstableBaselineError("final grouped reduction is not 1-minimal")
         return probes, records
 
@@ -612,10 +627,10 @@ class DdminFileReducer:
         workspace_root: Path,
         candidates: Sequence[Path],
         retained: Sequence[Path],
-        baseline_signature: FailureSignature,
+        baseline_signature: OracleBaseline | FailureSignature,
         match_mode: FailureMatchMode,
         phase: str,
-    ) -> tuple[ReductionOutcome, ProbeRecord]:
+    ) -> tuple[ReductionOutcome, bool, ProbeRecord]:
         retained_set = set(retained)
         with tempfile.TemporaryDirectory(prefix="pyrepro-ddmin-probe-") as name:
             probe_root = Path(name) / "project"
@@ -626,19 +641,25 @@ class DdminFileReducer:
             started_at = perf_counter()
             result = self.runner.run(probe_root)
             duration_seconds = perf_counter() - started_at
-            outcome = classify_result(
-                result, baseline_signature, probe_root, match_mode
-            )
-            return outcome, _probe_record(
-                phase,
-                retained,
-                result,
+            baseline = coerce_oracle_baseline(baseline_signature, match_mode)
+            evaluation = baseline.evaluate(result, probe_root)
+            outcome = legacy_outcome(result, evaluation)
+            accepted = evaluation.decision is OracleDecision.MATCH
+            return (
                 outcome,
-                False,
-                duration_seconds,
-                probe_root,
-                workspace_root,
-                _python_line_count(retained),
+                accepted,
+                _probe_record(
+                    phase,
+                    retained,
+                    result,
+                    outcome,
+                    accepted,
+                    duration_seconds,
+                    probe_root,
+                    workspace_root,
+                    _python_line_count(retained),
+                    candidate_rolled_back=not accepted,
+                ),
             )
 
 
@@ -738,40 +759,34 @@ def _establish_baseline(
     expected_text: str | None,
     match_mode: FailureMatchMode = FailureMatchMode.STRICT,
     budget: ExecutionBudget | None = None,
-) -> tuple[FailureSignature, int]:
-    signatures: list[FailureSignature] = []
+    *,
+    oracle: FailureOracle | None = None,
+) -> tuple[OracleBaseline, int]:
+    results: list[ExecutionResult] = []
     for _ in range(baseline_runs):
         result = _run_oracle(
             runner, workspace_root, budget, OracleExecutionKind.BASELINE
         )
-        signature = FailureSignature.from_result(result, workspace_root)
-        if signature is None:
-            raise UnstableBaselineError("baseline is not an uncaught Python failure")
-        signatures.append(signature)
-    if any(
-        not _signatures_match(signature, signatures[0], match_mode)
-        for signature in signatures[1:]
-    ):
-        raise UnstableBaselineError("baseline failure signature is unstable")
-    baseline = signatures[0]
-    if expected_text is not None and expected_text not in baseline.describe():
-        raise UnstableBaselineError(
-            f"baseline failure does not contain expected text: {expected_text!r}"
-        )
-    return baseline, baseline_runs
+        results.append(result)
+    active_oracle = oracle or PythonExceptionOracle(match_mode, expected_text)
+    try:
+        return active_oracle.establish_baseline(results, workspace_root), baseline_runs
+    except OracleBaselineError as error:
+        raise UnstableBaselineError(str(error)) from error
 
 
 def _verify_final_workspace(
     runner: CommandRunner,
     workspace_root: Path,
-    baseline_signature: FailureSignature,
+    baseline_signature: OracleBaseline | FailureSignature,
     match_mode: FailureMatchMode = FailureMatchMode.STRICT,
     budget: ExecutionBudget | None = None,
 ) -> ReductionOutcome:
     result = _run_oracle(
         runner, workspace_root, budget, OracleExecutionKind.FINAL_VERIFICATION
     )
-    return classify_result(result, baseline_signature, workspace_root, match_mode)
+    baseline = coerce_oracle_baseline(baseline_signature, match_mode)
+    return legacy_outcome(result, baseline.evaluate(result, workspace_root))
 
 
 def _run_oracle(
@@ -784,14 +799,6 @@ def _run_oracle(
     if budget is None:
         return runner.run(workspace_root)
     return budget.run_oracle(runner, workspace_root, kind=kind)
-
-
-def _signatures_match(
-    candidate: FailureSignature,
-    baseline: FailureSignature,
-    match_mode: FailureMatchMode,
-) -> bool:
-    return signatures_match(candidate, baseline, match_mode)
 
 
 def _apply_retained_candidates(
