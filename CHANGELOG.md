@@ -15,6 +15,10 @@
 
 ### Changed
 
+- Probe JSONL records now expose whether a command timed out and whether either
+  captured stream was truncated, making runner limits visible next to Oracle
+  decisions and acceptance.
+
 - Expanded the V1.1 failure-oracle contract into user-configurable product
   behavior. `reduce` and `prune-imports` now support exact exit-code matching
   and literal or regular-expression markers in stdout, stderr, or either
