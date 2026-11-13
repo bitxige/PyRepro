@@ -26,6 +26,23 @@ def test_tree_digest_changes_when_source_content_changes(tmp_path: Path):
     assert tree_digest(source) != before
 
 
+def test_tree_digest_can_normalize_text_line_endings_for_fixture_manifests(
+    tmp_path: Path,
+):
+    """Portable fixture digests treat CRLF and LF text as the same source."""
+    source = tmp_path / "project"
+    source.mkdir()
+    app = source / "app.py"
+    app.write_bytes(b"value = 1\r\n")
+    raw_crlf = tree_digest(source)
+    portable_crlf = tree_digest(source, normalize_text_line_endings=True)
+
+    app.write_bytes(b"value = 1\n")
+
+    assert tree_digest(source) != raw_crlf
+    assert tree_digest(source, normalize_text_line_endings=True) == portable_crlf
+
+
 def test_tree_digest_ignores_vcs_cache_and_environment_directories(tmp_path: Path):
     """Non-source directories cannot create false integrity failures."""
     source = tmp_path / "project"

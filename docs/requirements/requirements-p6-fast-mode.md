@@ -94,12 +94,14 @@ the budget into Import, Coarse, Greedy, CLI, staging, or publication.
 - P6c: `verify_and_publish` copies the accepted workspace to a sibling staging
   directory, runs three independent budgeted checks there, and atomically
   renames it into a new output directory only when all checks preserve the
-  baseline and the source digest remains unchanged. On Linux, publication uses
-  `renameat2(RENAME_NOREPLACE)` so a concurrently created destination is never
-  replaced. Platforms or filesystems without that no-clobber guarantee fail
-  with `runtime_error`; they do not fall back to ordinary `rename`. It returns
-  a structured terminal result and removes every unpublished staging directory.
-  It does not add a CLI entry point.
+  baseline and the source digest remains unchanged. On Linux and WSL,
+  publication uses `renameat2(RENAME_NOREPLACE)` so a concurrently created
+  destination is never replaced. On Windows, the native no-replace directory
+  rename behavior provides the same contract. Unsupported platforms or
+  filesystems fail with `runtime_error`; they do not fall back to a
+  check-then-rename sequence. It returns a structured terminal result and
+  removes every unpublished staging directory. It does not add a CLI entry
+  point.
 - P6d: explicit CLI integration, reporting, and end-to-end tests.
 
 ## CLI contract

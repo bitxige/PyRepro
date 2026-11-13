@@ -259,11 +259,14 @@ def _validate_destination(destination: Path, source_root: Path) -> Path:
 
 
 def _publish_staging(staging: Path, output: Path) -> None:
-    """Atomically rename a staged directory without replacing an existing path.
+    """Atomically publish a staged directory without replacing an existing path.
 
-    ``renameat2(..., RENAME_NOREPLACE)`` performs the existence check and
-    directory move in one kernel operation. Fast Mode intentionally fails on
-    systems that cannot provide this no-clobber guarantee instead of degrading
+    Linux uses ``renameat2(..., RENAME_NOREPLACE)``. Windows uses its native
+    ``os.rename`` behavior, which rejects an existing destination rather than
+    requesting replacement. Both backends move a staging directory created in
+    the output parent's directory, so publication stays on one filesystem.
+
+    Fast Mode intentionally fails on unsupported systems instead of degrading
     to a check-then-``rename`` sequence.
 
     Args:
@@ -274,19 +277,37 @@ def _publish_staging(staging: Path, output: Path) -> None:
         OSError: If the platform or filesystem cannot provide a no-clobber
             atomic move, or if the destination has appeared concurrently.
     """
-    if not sys.platform.startswith("linux"):
-        raise OSError(
-            errno.ENOTSUP,
-            "atomic no-clobber directory publication requires Linux renameat2",
-            str(output),
-        )
+    if sys.platform.startswith("linux"):
+        _publish_staging_linux(staging, output)
+        return
+    if sys.platform == "win32":
+        _publish_staging_windows(staging, output)
+        return
+    raise OSError(
+        errno.ENOTSUP,
+        "atomic no-clobber directory publication requires Linux or Windows",
+        str(output),
+    )
+
+
+def _publish_staging_linux(staging: Path, output: Path) -> None:
+    """Publish with Linux ``renameat2(RENAME_NOREPLACE)`` semantics.
+
+    Args:
+        staging: Existing sibling staging directory.
+        output: Non-existing final destination in the same parent directory.
+
+    Raises:
+        OSError: If the kernel cannot atomically move the directory without
+            replacing an existing destination.
+    """
     libc = ctypes.CDLL(None, use_errno=True)
     try:
         renameat2 = libc.renameat2
     except AttributeError as error:
         raise OSError(
             errno.ENOSYS,
-            "atomic no-clobber directory publication requires renameat2",
+            "atomic no-clobber directory publication requires Linux renameat2",
             str(output),
         ) from error
     renameat2.argtypes = (
@@ -309,6 +330,26 @@ def _publish_staging(staging: Path, output: Path) -> None:
     ):
         error_number = ctypes.get_errno()
         raise OSError(error_number, os.strerror(error_number), str(output))
+
+
+def _publish_staging_windows(staging: Path, output: Path) -> None:
+    """Publish with Windows' no-replace directory-rename behavior.
+
+    ``os.rename`` maps to the native Windows move operation without a replace
+    flag. An existing destination therefore raises ``FileExistsError``. The
+    Windows CI tests exercise both that collision behavior and a two-process
+    race; callers retain the staging directory until ``verify_and_publish``
+    cleans an unpublished result.
+
+    Args:
+        staging: Existing sibling staging directory.
+        output: Non-existing final destination in the same parent directory.
+
+    Raises:
+        OSError: If the move fails, including ``FileExistsError`` when another
+            process has already created the destination.
+    """
+    os.rename(staging, output)
 
 
 def _with_source_precedence(

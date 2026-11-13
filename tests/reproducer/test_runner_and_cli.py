@@ -22,9 +22,9 @@ FAILING_PROJECT = Path(__file__).parents[2] / "examples" / "failing_project"
 TRAINING_PROJECT = Path(__file__).parents[2] / "examples" / "training_failure"
 SYMBOL_PROJECT = Path(__file__).parents[2] / "examples" / "symbol_failure"
 
-linux_only = pytest.mark.skipif(
-    not sys.platform.startswith("linux"),
-    reason="atomic no-clobber publication requires Linux renameat2",
+publication_platform_only = pytest.mark.skipif(
+    not (sys.platform.startswith("linux") or sys.platform == "win32"),
+    reason="atomic no-clobber publication requires Linux or Windows",
 )
 
 
@@ -763,10 +763,10 @@ def test_module_cli_runs_symbol_reduction_after_the_file_strategy(
     ],
     ids=["standard", "fast"],
 )
-def test_reduce_rejects_target_aware_publication_off_linux(
+def test_reduce_rejects_target_aware_publication_on_unsupported_platform(
     tmp_path: Path, monkeypatch, capsys, mode_args
 ):
-    """Reject Linux-only publication before any reproduction command starts."""
+    """Reject unsupported publication before any reproduction command starts."""
     source = tmp_path / "source"
     source.mkdir()
     child = tmp_path / "child.py"
@@ -775,7 +775,7 @@ def test_reduce_rejects_target_aware_publication_off_linux(
         "Path(__file__).with_name('executed').write_text('ran')\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "darwin")
 
     with pytest.raises(SystemExit) as error:
         main(
@@ -794,7 +794,7 @@ def test_reduce_rejects_target_aware_publication_off_linux(
     captured = capsys.readouterr()
 
     assert error.value.code == 2
-    assert "Linux" in captured.err
+    assert "Linux, WSL, or Windows" in captured.err
     assert not (tmp_path / "executed").exists()
 
 
@@ -819,7 +819,41 @@ def test_legacy_standard_remains_available_off_linux(tmp_path: Path, monkeypatch
     assert (output / "reproduce.py").is_file()
 
 
-@linux_only
+def test_fast_mode_cli_allows_windows_publication(tmp_path: Path, monkeypatch, capsys):
+    """Windows reaches the target-aware publisher rather than failing early."""
+    source = tmp_path / "source"
+    output = tmp_path / "verified-output"
+    _fast_project(source)
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    status = main(
+        [
+            "reduce",
+            str(source),
+            "--mode",
+            "fast",
+            "--pytest-node",
+            "tests/test_target.py::test_failure",
+            "--max-oracle-executions",
+            "6",
+            "--max-coarse-probes",
+            "0",
+            "--output",
+            str(output),
+            "--",
+            sys.executable,
+            "run_target.py",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert "Final verification: 3/3 passed" in captured.out
+    assert (output / "run_target.py").is_file()
+
+
+@publication_platform_only
 def test_fast_mode_cli_publishes_a_verified_reproducer(tmp_path: Path, capsys):
     """Wire target-aware reduction, final verification, and publication together."""
     source = tmp_path / "source"
@@ -858,7 +892,7 @@ def test_fast_mode_cli_publishes_a_verified_reproducer(tmp_path: Path, capsys):
     ).read_text(encoding="utf-8")
 
 
-@linux_only
+@publication_platform_only
 def test_standard_mode_cli_uses_the_shared_pipeline_and_publisher(
     tmp_path: Path, capsys
 ):
@@ -909,7 +943,7 @@ def test_standard_mode_cli_uses_the_shared_pipeline_and_publisher(
     assert (output / "run_target.py").is_file()
 
 
-@linux_only
+@publication_platform_only
 def test_standard_mode_honors_an_explicit_global_execution_limit(
     tmp_path: Path,
     capsys,
@@ -941,7 +975,7 @@ def test_standard_mode_honors_an_explicit_global_execution_limit(
     assert (output / "run_target.py").is_file()
 
 
-@linux_only
+@publication_platform_only
 def test_fast_mode_cli_optionally_writes_final_result_reports(tmp_path: Path, capsys):
     """Final JSON and HTML reports describe the verified publication result."""
     source = tmp_path / "source"
@@ -1014,7 +1048,7 @@ def test_fast_mode_cli_optionally_writes_final_result_reports(tmp_path: Path, ca
     assert "PyRepro reduction report" in html_report.read_text(encoding="utf-8")
 
 
-@linux_only
+@publication_platform_only
 def test_fast_mode_cli_uses_output_oracle_for_reduction_and_publication(
     tmp_path: Path, capsys
 ):
@@ -1193,7 +1227,7 @@ def test_standard_fast_config_policy_matches_fast_stage_enablement():
         assert (fast_limit > 0) is (getattr(standard, name) is None)
 
 
-@linux_only
+@publication_platform_only
 def test_fast_mode_cli_minimum_budget_reserves_final_verification(
     tmp_path: Path, capsys
 ):
@@ -1233,7 +1267,7 @@ def test_fast_mode_cli_minimum_budget_reserves_final_verification(
     ).read_text(encoding="utf-8")
 
 
-@linux_only
+@publication_platform_only
 def test_fast_mode_cli_optionally_runs_span_ordered_symbol_probes(
     tmp_path: Path, capsys
 ):
@@ -1284,7 +1318,7 @@ def test_fast_mode_cli_optionally_runs_span_ordered_symbol_probes(
     assert any(record["phase"] == "symbol" for record in records)
 
 
-@linux_only
+@publication_platform_only
 def test_fast_mode_cli_optionally_runs_span_ordered_method_probes(
     tmp_path: Path, capsys
 ):
@@ -1339,7 +1373,7 @@ def test_fast_mode_cli_optionally_runs_span_ordered_method_probes(
     assert not method_record["candidate_rolled_back"]
 
 
-@linux_only
+@publication_platform_only
 def test_fast_mode_cli_optionally_runs_complete_if_probes(tmp_path: Path, capsys):
     """Experimental complete-if probes retain Fast publisher verification."""
     source = tmp_path / "source"
@@ -1385,7 +1419,7 @@ def test_fast_mode_cli_optionally_runs_complete_if_probes(tmp_path: Path, capsys
     assert if_record["candidate_rolled_back"]
 
 
-@linux_only
+@publication_platform_only
 def test_fast_mode_cli_optionally_runs_container_entry_probes(tmp_path: Path, capsys):
     """Container-entry probes retain Fast publisher verification and telemetry."""
     source = tmp_path / "source"
@@ -1431,7 +1465,7 @@ def test_fast_mode_cli_optionally_runs_container_entry_probes(tmp_path: Path, ca
     assert any(record["phase"] == "container_entry" for record in records)
 
 
-@linux_only
+@publication_platform_only
 def test_fast_mode_cli_optionally_runs_list_entry_probes(tmp_path: Path, capsys):
     """List-entry probes share Fast publisher verification and telemetry."""
     source = tmp_path / "source"
@@ -1477,7 +1511,7 @@ def test_fast_mode_cli_optionally_runs_list_entry_probes(tmp_path: Path, capsys)
     assert any(record["phase"] == "list_entry" for record in records)
 
 
-@linux_only
+@publication_platform_only
 def test_fast_mode_cli_runs_list_entry_reduction_by_default(tmp_path: Path, capsys):
     """Fast's B configuration makes list-entry reduction available by default."""
     source = tmp_path / "source"
@@ -1515,7 +1549,7 @@ def test_fast_mode_cli_runs_list_entry_reduction_by_default(tmp_path: Path, caps
     assert tree_digest(source) == source_digest
 
 
-@linux_only
+@publication_platform_only
 def test_fast_mode_cli_optionally_runs_main_guard_probes(tmp_path: Path, capsys):
     """Main-guard probes retain Fast publisher verification and telemetry."""
     source = tmp_path / "source"
@@ -1561,7 +1595,7 @@ def test_fast_mode_cli_optionally_runs_main_guard_probes(tmp_path: Path, capsys)
     assert any(record["phase"] == "main_guard" for record in records)
 
 
-@linux_only
+@publication_platform_only
 def test_fast_mode_cli_runs_main_guard_reduction_by_default(tmp_path: Path, capsys):
     """Fast's B configuration makes main-guard reduction available by default."""
     source = tmp_path / "source"
@@ -1598,7 +1632,7 @@ def test_fast_mode_cli_runs_main_guard_reduction_by_default(tmp_path: Path, caps
     assert tree_digest(source) == source_digest
 
 
-@linux_only
+@publication_platform_only
 def test_fast_mode_cli_optionally_runs_nested_list_entry_probes(tmp_path: Path, capsys):
     """Nested list-entry probes retain publisher verification and telemetry."""
     source = tmp_path / "source"

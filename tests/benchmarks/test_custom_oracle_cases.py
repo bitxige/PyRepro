@@ -62,7 +62,11 @@ def test_custom_oracle_case_has_a_stable_non_exception_baseline(
     oracle = _oracle_from_manifest(manifest["oracle"])
     baseline = oracle.establish_baseline(results, source)
 
-    assert tree_digest(source) == before == manifest["input_digest"]
+    assert tree_digest(source) == before
+    assert (
+        tree_digest(source, normalize_text_line_endings=True)
+        == manifest["input_digest"]
+    )
     assert all(
         baseline.evaluate(result, source).decision is OracleDecision.MATCH
         for result in results

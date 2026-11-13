@@ -241,10 +241,12 @@ Fast Mode prints one of these user-visible outcomes:
   runtime/publication error occurs.
 
 Fast Mode and target-aware Standard Mode publish with an atomic no-clobber
-operation on Linux. The requested output path must be new and outside the
-source project. On other platforms, PyRepro rejects these modes before
-executing any reproduction command; use Standard Mode without `--pytest-node`,
-or run in Linux/WSL.
+operation on Linux, WSL, and Windows. Linux/WSL use
+`renameat2(RENAME_NOREPLACE)`; Windows uses its native no-replace directory
+rename behavior. The requested output path must be new and outside the source
+project. PyRepro rejects these publication modes on macOS and other unsupported
+platforms before executing any reproduction command; use Standard Mode without
+`--pytest-node` there.
 
 ## Standard Mode
 
