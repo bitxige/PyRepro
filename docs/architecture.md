@@ -277,10 +277,12 @@ production pipeline.
 The CLI is an orchestration layer. It passes the final workspace and established
 signature to `verify_and_publish`, which creates sibling staging, runs the
 independent final 3/3 there, and atomically publishes only on success for both
-Fast and target-aware Standard Mode. Linux
-publication requires `renameat2(RENAME_NOREPLACE)`; there is no unsafe rename
-fallback. The publisher owns output no-clobber and source-integrity rules; the
-CLI maps its structured terminal states to user-facing output and exit status.
+Fast and target-aware Standard Mode. Linux and WSL publication require
+`renameat2(RENAME_NOREPLACE)`; Windows publication uses the native
+no-replace directory-rename behavior. There is no unsafe check-then-rename
+fallback, and macOS remains unsupported for these publication modes. The
+publisher owns output no-clobber and source-integrity rules; the CLI maps its
+structured terminal states to user-facing output and exit status.
 
 Optional final result reports are a presentation layer over completed reducer
 and Publisher data. `--json-report` and `--html-report` write separate,

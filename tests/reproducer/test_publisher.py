@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import errno
 import shutil
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -23,13 +25,21 @@ from pyrepro.reproducer.publisher import (
 from pyrepro.reproducer.runner import CommandRunner
 from pyrepro.reproducer.workspace import ReductionWorkspace, tree_digest
 
-linux_only = pytest.mark.skipif(
+publication_platform_only = pytest.mark.skipif(
+    not (sys.platform.startswith("linux") or sys.platform == "win32"),
+    reason="atomic no-clobber publication requires Linux or Windows",
+)
+linux_renameat2_only = pytest.mark.skipif(
     not sys.platform.startswith("linux"),
-    reason="atomic no-clobber publication requires Linux renameat2",
+    reason="test exercises Linux renameat2 directly",
+)
+windows_only = pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="test exercises native Windows rename behavior",
 )
 
 
-@linux_only
+@publication_platform_only
 def test_publishes_only_after_three_independent_matching_runs(tmp_path: Path):
     """A completed staging verification atomically creates the output directory."""
     source = _project(tmp_path / "source")
@@ -66,7 +76,7 @@ def test_publishes_only_after_three_independent_matching_runs(tmp_path: Path):
     )
 
 
-@linux_only
+@publication_platform_only
 def test_unbounded_policy_uses_the_same_three_run_publisher(tmp_path: Path):
     """Standard Mode has no budget but keeps staging and atomic publication."""
     source = _project(tmp_path / "source")
@@ -177,7 +187,7 @@ def test_missing_final_slot_returns_unverified_without_output(tmp_path: Path):
     assert not list(tmp_path.glob(".output.staging-*"))
 
 
-@linux_only
+@publication_platform_only
 def test_verified_output_reports_budget_exhaustion_after_early_stop(tmp_path: Path):
     """A successful final 3/3 can publish the best budget-stopped workspace."""
     source = _project(tmp_path / "source")
@@ -283,7 +293,7 @@ def test_publish_failure_removes_staging_directory(
 
     def fail_publish(source_path: Path, target_path: Path) -> None:
         del source_path, target_path
-        raise OSError("simulated publish failure")
+        raise PermissionError("simulated publish permission failure")
 
     monkeypatch.setattr("pyrepro.reproducer.publisher._publish_staging", fail_publish)
     with ReductionWorkspace(source) as workspace:
@@ -301,7 +311,7 @@ def test_publish_failure_removes_staging_directory(
     assert result.state is FastModeTerminalState.RUNTIME_ERROR
     assert not result.verified
     assert result.output_path is None
-    assert "simulated publish failure" in (result.error_message or "")
+    assert "simulated publish permission failure" in (result.error_message or "")
     assert not destination.exists()
     assert not list(tmp_path.glob(".output.staging-*"))
 
@@ -345,7 +355,7 @@ def test_publish_conflict_preserves_concurrently_created_output(
     assert not list(tmp_path.glob(".output.staging-*"))
 
 
-@linux_only
+@linux_renameat2_only
 def test_kernel_no_replace_publish_refuses_an_existing_empty_directory(tmp_path: Path):
     """The Linux publication primitive itself never replaces an empty output."""
     staging = tmp_path / "staging"
@@ -360,6 +370,87 @@ def test_kernel_no_replace_publish_refuses_an_existing_empty_directory(tmp_path:
     assert (staging / "verified.txt").read_text(encoding="utf-8") == "staged\n"
     assert output.is_dir()
     assert not list(output.iterdir())
+
+
+def test_windows_dispatches_to_os_rename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The Windows backend delegates publication to the native rename call."""
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    output = tmp_path / "output"
+    observed: list[tuple[Path, Path]] = []
+
+    def rename(source_path: Path, target_path: Path) -> None:
+        observed.append((source_path, target_path))
+
+    monkeypatch.setattr("pyrepro.reproducer.publisher.sys.platform", "win32")
+    monkeypatch.setattr("pyrepro.reproducer.publisher.os.rename", rename)
+
+    _publish_staging(staging, output)
+
+    assert observed == [(staging, output)]
+
+
+@windows_only
+def test_windows_publish_refuses_an_existing_empty_directory(tmp_path: Path):
+    """Windows must refuse an existing destination without replacing it."""
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "verified.txt").write_text("staged\n", encoding="utf-8")
+    output = tmp_path / "output"
+    output.mkdir()
+
+    with pytest.raises(FileExistsError):
+        _publish_staging(staging, output)
+
+    assert (staging / "verified.txt").read_text(encoding="utf-8") == "staged\n"
+    assert output.is_dir()
+    assert not list(output.iterdir())
+
+
+@windows_only
+def test_windows_two_process_publish_race_has_one_winner(tmp_path: Path):
+    """Two processes racing to one destination must produce one publication."""
+    staging_one = tmp_path / "staging-one"
+    staging_one.mkdir()
+    (staging_one / "winner.txt").write_text("one\n", encoding="utf-8")
+    staging_two = tmp_path / "staging-two"
+    staging_two.mkdir()
+    (staging_two / "winner.txt").write_text("two\n", encoding="utf-8")
+    output = tmp_path / "output"
+    start_signal = tmp_path / "start"
+    child = tmp_path / "publish_child.py"
+    child.write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        "import time\n"
+        "from pyrepro.reproducer.publisher import _publish_staging\n"
+        "staging, output, signal = map(Path, sys.argv[1:])\n"
+        "while not signal.exists():\n"
+        "    time.sleep(0.01)\n"
+        "try:\n"
+        "    _publish_staging(staging, output)\n"
+        "except FileExistsError:\n"
+        "    raise SystemExit(2)\n",
+        encoding="utf-8",
+    )
+    project_root = Path(__file__).parents[2]
+    processes = [
+        subprocess.Popen(
+            [sys.executable, str(child), str(staging), str(output), str(start_signal)],
+            cwd=project_root,
+        )
+        for staging in (staging_one, staging_two)
+    ]
+
+    time.sleep(0.1)
+    start_signal.touch()
+    return_codes = [process.wait(timeout=10) for process in processes]
+
+    assert sorted(return_codes) == [0, 2]
+    assert (output / "winner.txt").read_text(encoding="utf-8") in {"one\n", "two\n"}
+    assert sum(path.is_dir() for path in (staging_one, staging_two)) == 1
 
 
 def test_unsupported_platform_fails_without_rename_fallback(

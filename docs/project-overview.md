@@ -97,8 +97,9 @@ Tactics2D 对照表明，在固定受控故障案例中，该预处理优先流�
 
 P6 Fast Mode 将该流水线置于一个共享的 Oracle 执行/时间预算下。未接受 probe 的
 修改会回滚，已接受的 workspace 始终保留。当前 Fast Mode CLI 会把候选复制到 staging
-目录，在其中完成独立 3/3 验证后，才以 Linux 原子 no-clobber 方式发布官方 reproducer。
-预算停止只有在 final 3/3 已完成且发布成功时才能返回 verified 状态。
+目录，在其中完成独立 3/3 验证后，才以 Linux/WSL 或 Windows 的原子 no-clobber 方式
+发布官方 reproducer。macOS 上的 Fast 和 target-aware Standard 暂不支持。预算停止只有在
+final 3/3 已完成且发布成功时才能返回 verified 状态。
 
 Fast Mode 可选在文件级 cleanup 后执行已有的完整顶层 symbol 缩减。该阶段默认关闭；
 启用时以共享执行预算、有界 probe 数和既有严格 Oracle 运行，最终仍由 staging 3/3

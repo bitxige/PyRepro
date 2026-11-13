@@ -13,12 +13,13 @@
 - Fixed coarse-group splitting for candidates in sibling directories,
   preventing Standard Mode from failing while computing relative probe paths.
 
-- Target-aware Standard and Fast Mode now reject non-Linux platforms before
-  any baseline or search command starts, with a message pointing to Linux/WSL
-  or legacy Standard Mode. Previously the run consumed its baseline and
-  search budget before the publisher failed on the unsupported platform.
-
 ### Changed
+
+- Target-aware Standard and Fast Mode now support verified, atomic no-clobber
+  publication on Windows as well as Linux/WSL. Linux keeps its
+  `renameat2(RENAME_NOREPLACE)` backend unchanged; Windows uses its native
+  no-replace directory rename. macOS and other unsupported platforms are still
+  rejected before any baseline or search command starts.
 
 - Probe JSONL records now expose whether a command timed out and whether either
   captured stream was truncated, making runner limits visible next to Oracle
