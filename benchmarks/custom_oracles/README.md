@@ -12,8 +12,11 @@ verify user-selected runtime behavior rather than one reducer's AST domain.
 | `case_stderr_regex` | `output` / stderr / regex | An invalid record emits an `ERROR[PAYLOAD-n]` marker. |
 
 Every case has a frozen input tree, an adapter, a manifest, and 3/3 baseline
-evidence. The adapters deliberately return normally or exit through a
-business-result code: none relies on a Python exception as its target signal.
+evidence. Manifest input digests normalize CRLF/LF differences in known text
+files so the same fixture can be checked out on Linux and Windows without
+invalidating its frozen-input identity. The adapters deliberately return
+normally or exit through a business-result code: none relies on a Python
+exception as its target signal.
 
 ## Reproduction protocol
 

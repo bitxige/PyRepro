@@ -29,6 +29,21 @@ _DIGEST_IGNORED_DIRECTORY_NAMES = frozenset(
         "venv",
     }
 )
+_TEXT_DIGEST_SUFFIXES = frozenset(
+    {
+        ".cfg",
+        ".ini",
+        ".json",
+        ".md",
+        ".py",
+        ".pyi",
+        ".rst",
+        ".toml",
+        ".txt",
+        ".yaml",
+        ".yml",
+    }
+)
 
 
 @dataclass
@@ -129,6 +144,7 @@ def tree_digest(
     root: Path,
     *,
     ignored_directory_names: Collection[str] = _DIGEST_IGNORED_DIRECTORY_NAMES,
+    normalize_text_line_endings: bool = False,
 ) -> str:
     """Return a deterministic digest of source files and links.
 
@@ -139,6 +155,10 @@ def tree_digest(
     Args:
         root: Existing directory to hash.
         ignored_directory_names: Directory names excluded from traversal.
+        normalize_text_line_endings: Whether to normalize CRLF to LF in known
+            textual files. This is intended for portable frozen-fixture
+            manifests; production source-integrity checks use the default
+            byte-exact behavior.
 
     Returns:
         SHA-256 digest of relative paths, entry kinds, link targets, and file
@@ -170,10 +190,27 @@ def tree_digest(
             elif path.is_file():
                 relative = path.relative_to(root).as_posix().encode()
                 hasher.update(b"file\0" + relative + b"\0")
-                with path.open("rb") as source:
-                    for chunk in iter(lambda: source.read(8192), b""):
-                        hasher.update(chunk)
+                _hash_file_contents(
+                    hasher,
+                    path,
+                    normalize_text_line_endings=normalize_text_line_endings,
+                )
     return hasher.hexdigest()
+
+
+def _hash_file_contents(
+    hasher: hashlib._Hash,
+    path: Path,
+    *,
+    normalize_text_line_endings: bool,
+) -> None:
+    """Hash one file, optionally using portable text line endings."""
+    if normalize_text_line_endings and path.suffix.lower() in _TEXT_DIGEST_SUFFIXES:
+        hasher.update(path.read_bytes().replace(b"\r\n", b"\n"))
+        return
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(8192), b""):
+            hasher.update(chunk)
 
 
 def _hash_symlink(hasher, path: Path, root: Path) -> None:
