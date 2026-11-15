@@ -1,379 +1,210 @@
 # PyRepro
 
-PyRepro automatically reduces a failing Python project into a smaller,
-execution-verified reproducing case.
+**Execution-verified failure reduction for Python projects.**
+
+PyRepro turns a failing, trusted local Python project into a smaller reproducer
+while preserving a user-selected runtime behavior. It uses static analysis to
+find candidates, but an execution oracle is the only authority that can accept
+an edit.
 
 ```text
-Large failing project
-        |
-        v
-      PyRepro
-        |
-        v
-Smaller verified reproducer
+Trusted project + reproduction command
+                 │
+                 ▼
+      Stable three-run failure baseline
+                 │
+                 ▼
+   Execution-verified, reversible reduction
+                 │
+                 ▼
+       Smaller verified reproducer
 ```
-
-Its guiding principle is:
 
 > Static analysis guides reduction; execution validates it.
 
-## Current status
+## Why PyRepro
 
-PyRepro supports a developer-selected **trusted local** Python project and an
-argv reproduction command. It establishes a stable user-selected failure
-condition, works in a disposable copy, and verifies that condition in the
-final output.
-It provides greedy and grouped file strategies, optional top-level symbol
-reduction, and an opt-in Fast Mode that composes import pruning, bounded coarse
-file reduction, greedy cleanup, optional complete-symbol, direct-method, and
-complete-`if` reduction, final staging verification, and safe output
-publication.
+Reducing a real repository is more than deleting a single source file. PyRepro
+works from a project root and a trusted argv command, preserves a stable
+failure condition, reduces across repository and source-level boundaries, then
+publishes only an independently verified result.
 
-PyRepro runs the supplied command repeatedly. It does not install dependencies
-or modify the source project, but it is not an execution sandbox. Only use it
-with code and commands you trust.
+- **Repository-oriented:** works from a Python project directory, not just a
+  standalone source file.
+- **Execution-verified:** every accepted edit preserves the configured
+  failure condition at runtime.
+- **Flexible failure conditions:** preserve a Python exception, an exit code,
+  or a literal/regular-expression marker in output.
+- **Two execution policies:** use Fast Mode for bounded search or Standard
+  Mode for a fixed point of the current production reducer set.
+- **Safe publication:** source integrity checks, disposable workspaces,
+  staging verification, and atomic no-clobber output publication.
+- **Inspectable results:** JSONL probe telemetry plus JSON and HTML result
+  reports.
 
-## Usage
+PyRepro is not a sandbox. It repeatedly runs the command that you provide.
+Only use it with local code and commands that you trust.
+
+## Quick start
+
+Install a development checkout with the quality tools:
 
 ```bash
 python -m pip install -e ".[dev]"
-
-pyrepro reduce ~/my_project \
-  --strategy ddmin \
-  --max-granularity symbol \
-  --expect "operands could not be broadcast" \
-  -- python train.py --config configs/debug.yaml
 ```
 
-`--expect` is optional. When supplied, its normalized text must occur in the
-established failure signature before reduction begins. This prevents reduction
-from starting against an unintended baseline failure.
-
-`--failure-match strict` is the default and preserves the complete failure
-identity: exception type, normalized message, and final traceback frame. The
-`message` mode is reserved for controlled reducer comparisons; it intentionally
-does not change the default product behavior.
-
-### Configured failure oracles
-
-The default `--oracle exception` preserves the established Python exception
-signature behavior. V1.1 also supports a user-selected exit code or a bounded
-stdout/stderr marker without requiring a Python exception:
+Reduce a project that reproduces a Python exception:
 
 ```bash
-# Preserve an application-defined exit status.
-pyrepro reduce ~/my_project \
+pyrepro reduce ./my-project \
+  --expect "expected failure message" \
+  --output ./reduced-project \
+  -- python -m pytest tests/test_feature.py::test_failure
+```
+
+PyRepro first establishes the same baseline three times. It then performs all
+candidate executions in disposable copies and leaves the source directory
+unchanged. The target output directory must be new and outside the source
+tree.
+
+See the [User Guide](docs/user-guide.md) for complete commands, failure-oracle
+configuration, reports, platforms, and troubleshooting.
+
+## Failure oracles
+
+The default `exception` oracle preserves the established exception type,
+normalized message, and repository-relative traceback frame. `--expect` is an
+optional anchor for that baseline.
+
+```bash
+# Preserve a specific application exit status.
+pyrepro reduce ./my-project \
   --oracle exit-code --expected-exit-code 42 \
+  --output ./reduced-project \
   -- python reproduce.py
 
-# Preserve a literal diagnostic on stderr.
-pyrepro reduce ~/my_project \
+# Preserve a diagnostic in stderr.
+pyrepro reduce ./my-project \
   --oracle output --output-stream stderr \
   --output-match literal --output-pattern "VALIDATION_FAILED" \
+  --output ./reduced-project \
   -- python reproduce.py
 
-# Preserve a variable diagnostic using a regular expression.
-pyrepro reduce ~/my_project \
+# Preserve a variable diagnostic with a regular expression.
+pyrepro reduce ./my-project \
   --oracle output --output-stream both \
   --output-match regex --output-pattern 'ERROR\\[PAYLOAD-\\d+\\]' \
+  --output ./reduced-project \
   -- python reproduce.py
 ```
 
-Configured output matching never stores complete command output in reports.
-If a selected stream is truncated and the marker is absent, or if the command
-times out, the result is `inconclusive` and the candidate is rejected.
-`--expect` and `--failure-match` apply only to `--oracle exception`.
+Each oracle returns `match`, `no_match`, or `inconclusive`. Only `match` can
+retain an edit. A timeout, or a missing marker in truncated selected output, is
+inconclusive and therefore cannot accept a candidate.
 
-By default, the verified output is written outside the source project at:
+## Fast and Standard modes
 
-```text
-<source-parent>/.pyrepro-output/<source-name>/
-```
+| Mode | Use it when | Search policy |
+| --- | --- | --- |
+| **Fast** | You need a bounded, verified result promptly. | Explicit global Oracle/time budget and per-stage limits. |
+| **Standard** | You want deeper reduction under the current reducers. | No default search limit; repeat sweeps until no stage accepts an edit. |
 
-Use `--output <path>` to choose another non-existing directory outside the
-source project.
+Both target-aware modes use the same production pipeline: import pruning,
+coarse and file reduction, symbols, direct methods, complete `if` statements,
+container/list entries, `__main__` guards, and constrained nested palette
+entries. They share candidate rediscovery, rollback, reporting, final staging
+verification, and publication behavior.
 
-Candidate deletion skips common environment, generated-output, data, model,
-and cache directories. Those files remain available in each disposable copy so
-the reproduction command can still use them.
+### Fast Mode
 
-`--strategy` accepts `greedy` (the default) and `ddmin`. The latter uses fresh
-candidate copies for grouped probes, then verifies that no remaining candidate
-file can be removed independently. It reports candidate Python files and LOC,
-oracle executions, probe outcomes, removed files, and wall-clock duration. It
-does not claim a globally smallest reproducer.
-
-Without `--pytest-node`, Standard Mode preserves the original file-only and
-optional top-level-symbol CLI behavior. Supplying a target node switches
-Standard Mode to the shared production pipeline described below.
-
-`--probe-records <path>` optionally writes one JSONL object for each
-execution-verified candidate probe. Each record includes the phase, proposed
-candidate paths and optional binding-level details, oracle outcome, acceptance
-decision, configured Oracle type, bounded decision reason/evidence, command
-duration, cumulative command time, timeout status, whether each captured stream
-was truncated, proposed candidate Python LOC, return code, parsed exception
-details, failure signature, and whether a
-rejected source-edit candidate was rolled back. The path
-must be new and outside the source project. This observability output does not
-alter reduction decisions.
-
-`--json-report <path>` and `--html-report <path>` optionally write final
-result reports. They are separate from probe telemetry: each report summarizes
-the completed reduction's original argv command, size, Oracle cost, stage
-metrics, source integrity, publication status, final verification, and
-configured Oracle type/configuration and decision counts. Both paths must be
-new and outside
-the source project. The HTML report is rendered from the same data as the JSON
-report. In Fast Mode, an unpublished terminal state remains explicitly marked
-as unverified and unpublished.
-See [`docs/report-schema.md`](docs/report-schema.md) for field meanings and
-Oracle-counting boundaries.
-
-The module entry point is equivalent:
+Fast Mode requires a target pytest node and an explicit global Oracle budget.
+The final three executions are reserved for staging verification.
 
 ```bash
-python -m pyrepro reduce examples/training_failure \
-  --probe-records /tmp/pyrepro-probes.jsonl \
-  --expect "operands could not be broadcast" \
-  -- python train.py
-```
-
-### Terminal progress
-
-`pyrepro reduce` shows a compact live progress bar on an interactive terminal.
-Fast Mode displays started Oracle commands against its shared execution limit;
-Standard Mode displays a pulse and the actual number of commands started rather
-than inventing a total. Redirected output stays clean by default. Use
-`--progress on` to force the display or `--progress off` to disable it.
-
-## Fast Mode
-
-Fast Mode is an explicit, budgeted workflow for producing a verified
-reproducer. It uses target-aware import pruning, optional coarse file probes,
-and greedy cleanup under one global Oracle-command budget. The output is copied
-to staging and independently verified three times before PyRepro publishes it.
-
-```bash
-pyrepro reduce ~/my_project \
+pyrepro reduce ./my-project \
   --mode fast \
-  --pytest-node tests/test_example.py::test_failure \
-  --max-oracle-executions 60 \
-  --max-time-seconds 120 \
-  --max-import-probes 16 \
-  --max-coarse-probes 16 \
-  --max-symbol-probes 60 \
-  --max-method-probes 60 \
-  --max-if-statement-probes 60 \
-  --max-container-entry-probes 60 \
-  --max-list-entry-probes 60 \
-  --max-main-guard-probes 60 \
-  --max-nested-list-entry-probes 60 \
-  --symbol-order span-desc \
-  --json-report /tmp/reduced-example.json \
-  --html-report /tmp/reduced-example.html \
-  --output /tmp/reduced-example \
-  -- python run_target.py
+  --pytest-node tests/test_feature.py::test_failure \
+  --max-oracle-executions 630 \
+  --timeout-seconds 15 \
+  --progress on \
+  --json-report ./fast-report.json \
+  --html-report ./fast-report.html \
+  --output ./reduced-fast \
+  -- python -m pytest tests/test_feature.py::test_failure
 ```
 
-`--mode fast` requires both `--pytest-node` and
-`--max-oracle-executions`. Its default production stage configuration enables
-complete-symbol (60), direct-method (265), complete-`if` (60),
-module-dictionary-entry (60), module-list-entry (60), module-level
-`__main__` guard (8), and nested `Palette([...])` RGB-list entry (12) probes.
-The global Oracle budget remains explicit. Passing `0` to any corresponding
-`--max-*-probes` option disables that stage; positive values bound its probes.
-Method reduction
-is deliberately limited to direct methods
-of module-level classes and skips a sole method rather than creating an empty
-class body. Complete-`if` reduction considers only complete source `if`
-statements in top-level functions and direct methods. It excludes source
-`elif` nodes, nested definitions, module/class bodies, comments, and semicolon
-chains; it inserts `pass` only when removal would otherwise empty the direct
-parent suite. Its fixed span-descending order is advisory, not deletion
-permission. Container-entry reduction runs after complete-if reduction. It
-only considers unambiguous multiline module-level dictionaries with string
-keys and either string or integer literals (excluding booleans), or direct named
-constructor calls whose
-arguments are static literals. It skips semicolon chains, duplicate or rebound
-bindings, unpacking, and dynamic values. A mixed dictionary may still
-contribute independently source-safe entries: unsupported and comment-adjacent
-entries are retained unchanged. It probes whole entry batches and recursively
-splits rejected batches; static facts never accept a deletion on their own.
-List-entry reduction runs after module-dictionary
-reduction. It only considers unambiguous multiline module-level lists whose
-unique entries are tuples of integer literals. It skips comments, semicolon
-chains, duplicate or rebound bindings, dynamic items, and all other list
-shapes. It probes whole entry batches and recursively splits rejected batches;
-static facts never accept a deletion on their own. Main-guard reduction runs
-after module-list reduction. It only considers direct module-level statements
-whose entire condition is exactly `__name__ == "__main__"` or the reversed
-form; it excludes nested guards and all other module-level control flow. It
-deletes only the complete guard statement (including an inline header comment),
-re-discovers candidates after accepted edits, and recursively splits rejected
-batches. Nested-list entry reduction runs after main-guard reduction. It only
-considers unambiguous direct module-level `Palette(...)` bindings whose first
-argument is a multiline, comment-free list of static RGB integer triples. It
-preserves the assignment and outer constructor, identifies entries by current
-source location rather than RGB value, and probes complete entry batches before
-recursively splitting rejections. `--symbol-order span-desc`
-probes larger source spans first, with stable path and source-position
-tiebreakers, for every enabled symbol stage. All seven bounded source stages share the Fast
-Mode budget, strict Oracle, rollback, and final Publisher verification; none
-uses `--max-granularity symbol`.
-`--strategy ddmin` and `--max-granularity symbol` remain rejected in Fast Mode,
-and `--max-coarse-probes 0` disables the optional coarse stage.
+Fast Mode's default production stage limits are import pruning `16`, coarse
+reduction `16`, complete symbols `60`, direct methods `265`, complete `if`
+statements `60`, container entries `60`, list entries `60`, `__main__` guards
+`8`, and nested palette entries `12`. Set an individual `--max-*-probes` value
+to `0` to disable that stage.
 
-The command budget reserves three executions for final independent verification.
-The minimum budget is six executions: three to establish the baseline and three
-to verify the staged output. A six-execution run has no search probes available;
-it can safely publish the unchanged accepted workspace after final 3/3
-verification, but does not promise additional minimization.
+### Standard Mode
 
-Fast Mode prints one of these user-visible outcomes:
-
-- `completed`: reduction finished and a final 3/3-verified reproducer was
-  published.
-- `budget_exhausted_verified`: search stopped for the configured budget, but
-  the accepted candidate passed final 3/3 verification and was published.
-- an unpublished failure: no official reproducer is created when final
-  verification cannot complete, fails to match, the source changes, or a
-  runtime/publication error occurs.
-
-Fast Mode and target-aware Standard Mode publish with an atomic no-clobber
-operation on Linux, WSL, and Windows. Linux/WSL use
-`renameat2(RENAME_NOREPLACE)`; Windows uses its native no-replace directory
-rename behavior. The requested output path must be new and outside the source
-project. PyRepro rejects these publication modes on macOS and other unsupported
-platforms before executing any reproduction command; use Standard Mode without
-`--pytest-node` there.
-
-## Standard Mode
-
-Standard Mode uses the same production reducer order, strict failure oracle,
-candidate rediscovery, rollback, staging verification, and atomic publication
-as Fast Mode. It differs only in execution policy: it has no default global or
-per-stage search cap. Provide `--pytest-node` to use the shared pipeline:
+With `--pytest-node`, Standard Mode runs the same pipeline with unbounded
+stage limits by default. It restarts from the first stage after any accepted
+edit and stops only after a full sweep has no accepted edit. That fixed point
+is relative to the current production reducers; it is not a global-minimum
+claim.
 
 ```bash
-pyrepro reduce ~/my_project \
-  --pytest-node tests/test_example.py::test_failure \
-  --output /tmp/reduced-example \
-  -- python run_target.py
+pyrepro reduce ./my-project \
+  --mode standard \
+  --pytest-node tests/test_feature.py::test_failure \
+  --timeout-seconds 15 \
+  --progress on \
+  --json-report ./standard-report.json \
+  --html-report ./standard-report.html \
+  --output ./reduced-standard \
+  -- python -m pytest tests/test_feature.py::test_failure
 ```
 
-The pipeline runs import pruning, optional coarse deletion, greedy file
-reduction, complete symbols, direct methods, complete `if` statements,
-container entries, list entries, `__main__` guards, and nested palette entries
-in the same order as Fast Mode. A Standard run starts a new sweep from import
-pruning whenever any stage accepted an edit, and stops only when an entire
-sweep accepts no edit. This fixed point is limited to the current production
-reducer set; it is not a claim of global minimality.
+For a controlled Fast/Standard comparison, pass identical stage-enablement
+settings and add `--standard-stage-policy fast-config` to Standard Mode.
 
-Standard Mode keeps the per-command timeout and disposable-workspace/source
-integrity safeguards. It has no default overall time or Oracle cap, so users
-may interrupt a long search with Ctrl+C. Like Fast Mode, it independently
-checks the staging copy three times and publishes only after all three preserve
-the established failure. Supplying `--max-oracle-executions N` and/or
-`--max-time-seconds N` makes either bound explicit for one Standard run; the
-three final verification executions remain reserved when a command-count cap
-is supplied.
+## Reports and progress
 
-For a controlled Fast/Standard comparison, pass the same `--max-*-probes`
-enablement settings to both commands and add
-`--standard-stage-policy fast-config` to Standard Mode. This preserves Fast
-Mode's enabled-stage set while Standard leaves every enabled stage unbounded.
-The default `full` policy intentionally enables all production stages in
-Standard Mode.
+Use `--probe-records PATH` for one JSONL record per candidate probe. Use
+`--json-report PATH` and `--html-report PATH` for a completed-run summary.
+Reports include size reduction, Oracle accounting, stage and sweep metrics,
+source integrity, final verification, publication state, and the configured
+oracle. The HTML report is rendered from the same structured data as the JSON
+report.
 
-## Read-only import analysis
+On an interactive terminal, `pyrepro reduce` displays live progress. Fast Mode
+shows commands started against its budget. Standard Mode shows a pulse and the
+actual started-command count because there is intentionally no invented total.
+Use `--progress on` or `--progress off` to override automatic display.
 
-Use `analyze-imports` to inspect generic preprocessing candidates before any
-reduction. It supports common flat and `src` layouts, package re-exports, and
-relative imports, while reporting conservative skips for uncertain structures.
-It does not execute a reproduction command or modify the source project.
+## Platform support
 
-```bash
-pyrepro analyze-imports ~/my_project
-```
+Target-aware Fast and Standard runs publish verified outputs atomically without
+overwriting an existing destination on **Linux**, **WSL**, and **Windows**.
+Linux and WSL use `renameat2(RENAME_NOREPLACE)`; Windows uses its native
+no-replace directory rename behavior. macOS currently rejects these
+target-aware publication modes before any reproduction command is run.
 
-The report lists potential unused test-module imports and package re-exports,
-alongside explanations for skips such as dynamic imports, `import *`, unresolved
-modules, and obvious import-time side effects. A listed candidate is not proof
-that deletion is safe; a later reduction phase must validate any edit with the
-failure oracle.
+## Documentation
 
-For a conventional pytest failure, scope analysis to the exact target test so
-imports used solely by unrelated tests in the same file can become candidates:
-
-```bash
-pyrepro analyze-imports ~/my_project \
-  --pytest-node tests/test_example.py::test_failure
-```
-
-Class-method nodes use `FILE::CLASS::TEST`. This remains a read-only command:
-it neither executes pytest nor changes source. Re-export candidates show an
-associated static `__all__` line when a later verifier must update both
-structures together. A `side_effect_risk` label means the static analyzer found
-an import-time uncertainty; it is not approval to remove the import.
-
-## Execution-verified import pruning
-
-`prune-imports` converts target-aware import candidates into narrowly scoped,
-source-local edits in a disposable workspace. It first establishes the normal
-three-run strict failure baseline, then tries ordinary candidates in a batch.
-Rejected batches are restored and split only up to `--max-import-probes`.
-Candidates carrying `side_effect_risk` are tried separately after ordinary
-candidates; neither group is accepted without the same runtime failure.
-
-```bash
-pyrepro prune-imports ~/my_project \
-  --pytest-node tests/test_example.py::test_failure \
-  --max-import-probes 16 \
-  --probe-records /tmp/import-pruning.jsonl \
-  -- python run_target.py
-```
-
-The unreleased P7 implementation extends this stage to top-level single-line
-and parenthesized multiline `import` / `from ... import` statements, plus one
-static literal `__all__` list or tuple. It skips any edited span with comments
-or semicolon chaining. For a package re-export, all selected import bindings
-and their shared `__all__` entries form one atomic proposal. Dynamic imports,
-wildcard imports, dynamic exports, annotated or multiple-target `__all__`
-assignments, and source shapes that cannot be safely composed are skipped rather
-than rewritten. `prune-imports` does not run greedy, ddmin, or symbol reduction;
-the preprocessing-first reducer composes verified preprocessing with file
-reduction.
-
-## Included smoke fixtures
-
-- `examples/failing_project`: preserves `KeyError: 'width'` at
-  `app/parser.py::parse_lane` and reduces 12 candidate Python files to 3.
-- `examples/training_failure`: simulates a training reward-vector mismatch and
-  preserves `ValueError: operands could not be broadcast...` at
-  `reward/shaping.py::weighted_reward`.
-- `examples/grouped_failure`: contains 33 eligible Python files, including an
-  optional pair that greedy retains individually but the grouped strategy can
-  remove together while preserving `RuntimeError: grouped reduction failure`.
-- `examples/symbol_failure`: a 9-file, 650-LOC fixture that first reduces to
-  four required files, then removes internal top-level symbol ballast while
-  preserving the deterministic reward shape mismatch.
-
-## Architecture and roadmap
-
-See [docs/architecture.md](docs/architecture.md) for the reduction and
-retained static-analysis foundations. The broader goals and staged roadmap are
-in [docs/project-overview.md](docs/project-overview.md).
-
-See `docs/requirements/requirements-p6-fast-mode.md` for Fast Mode's budget,
-verification, and publication contract.
+- [User Guide](docs/user-guide.md) — installation, commands, modes, oracles,
+  reports, platforms, and troubleshooting.
+- [Project Overview](docs/project-overview.md) — product scope and delivery
+  milestones.
+- [Architecture](docs/architecture.md) — module responsibilities and trust
+  boundaries.
+- [Report Schema](docs/report-schema.md) — JSON report fields and accounting.
+- [Requirements](docs/requirements/) — accepted stage contracts.
+- [Evaluation](docs/evaluation/) — benchmark protocol, validation evidence,
+  and competitor applicability analysis.
 
 ## Development
-
-See [CHANGELOG.md](CHANGELOG.md) for notable current changes.
 
 ```bash
 ruff check .
 ruff format --check .
 pytest
 ```
+
+Contributions should preserve the execution boundary: use `subprocess` with
+`shell=False`, execute only in disposable workspaces, preserve the source tree,
+and accept edits only through the configured runtime oracle.

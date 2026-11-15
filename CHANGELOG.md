@@ -15,6 +15,10 @@
 
 ### Changed
 
+- Consolidated the public documentation around an English product overview and
+  user guide covering installation, configured failure oracles, Fast/Standard
+  operation, reports, platform support, and troubleshooting.
+
 - Target-aware Standard and Fast Mode now support verified, atomic no-clobber
   publication on Windows as well as Linux/WSL. Linux keeps its
   `renameat2(RENAME_NOREPLACE)` backend unchanged; Windows uses its native
