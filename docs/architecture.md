@@ -129,8 +129,8 @@ same module do not. Static `__all__` candidates include a companion line for a
 later consistent edit. Candidates carrying `side_effect_risk` remain proposals
 only and require execution validation.
 
-`prune-imports` is the narrow P5.2c validation stage. The unreleased P7 work
-extends its supported source shapes. It uses that explicit
+`prune-imports` is the narrow P5.2c validation stage. P7 extends its supported
+source shapes. It uses that explicit
 pytest node only for syntax-level target scope; its supplied argv remains the
 actual trusted reproduction command. The pruner establishes the existing
 three-run failure baseline in a disposable workspace, constructs only
